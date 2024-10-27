@@ -1,0 +1,4 @@
+onnxruntime
+numpy==1.23.5
+ruamel.yaml
+colorama
