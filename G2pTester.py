@@ -6,9 +6,9 @@ import sys
 import ruamel.yaml
 from pathlib import Path as P
 from colorama import Fore, Style, init
-import re  # Import regex module
+import re
 
-init(autoreset=True)  # Initialize colorama for automatic style reset
+init(autoreset=True)
 
 class G2pTester:
     def __init__(self, config_path='config.yaml'):
@@ -17,10 +17,10 @@ class G2pTester:
         self.grapheme_indexes = {}
         self.pred_cache = defaultdict(list)
         self.session = None
-        self.config_path = config_path  # Store config path for reloading
-        self.split_character = False  # Initialize split character option
-        self.load_config()  # Initial model loading
-        self.prompt_for_grapheme()  # Start grapheme loop
+        self.config_path = config_path 
+        self.split_character = False
+        self.load_config()
+        self.prompt_for_grapheme()
 
     def load_config(self):
         yaml = ruamel.yaml.YAML()
@@ -30,20 +30,17 @@ class G2pTester:
             try:
                 with open(self.config_path, 'r', encoding=encoding) as f:
                     config = yaml.load(f)
-                break  # Exit loop if successful
+                break 
             except Exception as e:
-                continue  # Try the next encoding if it fails
-
+                continue 
         if config is None:
             print(Fore.RED + "Failed to load configuration file with supported encodings.")
             sys.exit(1)
 
-        # Display available models for selection
         print(Fore.LIGHTGREEN_EX + "Available models:")
         for i, model in enumerate(config):
             print(Fore.CYAN + f"{i + 1}: {model['model_name']}")
 
-        # Model selection with error handling
         while True:
             try:
                 model_index = int(input(Fore.YELLOW + "Select a model by number: \n")) - 1
@@ -51,7 +48,7 @@ class G2pTester:
                     print(Fore.RED + "Invalid selection. Please enter a valid model number.")
                 else:
                     selected_model = config[model_index]
-                    break  # Exit loop once a valid model is selected
+                    break
             except ValueError:
                 print(Fore.RED + "Invalid input. Please enter a number.")
 
@@ -60,12 +57,12 @@ class G2pTester:
         self.phonemes = selected_model['phonemes'][4:]  # Skip initial placeholder phonemes
         self.dict_path = selected_model['dict_path']
         self.onnx_path = selected_model['onnx_path']
-        self.split_character = selected_model.get('split_character', False)  # Get split character option
+        self.split_character = selected_model.get('split_character', False)
         self.load_pack()  # Load dictionary and model for the selected configuration
 
     def load_pack(self):
-        loaded_dict = False  # Track if any valid dictionary is loaded
-        loaded_model = False  # Track if the ONNX model is loaded
+        loaded_dict = False
+        loaded_model = False
         encodings = ['utf-8', 'utf-16', 'utf-8-sig', 'shift-jis', 'iso-8859-1']
 
         # Ensure dict_paths is always a list
@@ -73,13 +70,13 @@ class G2pTester:
 
         # Load dictionary from multiple files
         for dict_path_str in dict_paths:
-            dict_path = P(dict_path_str)  # Convert to Path object for each path
+            dict_path = P(dict_path_str)
             if dict_path.exists():
                 for encoding in encodings:
                     try:
                         with open(dict_path, 'r', encoding=encoding) as f:
                             for line in f:
-                                parts = line.strip().split('  ')
+                                parts = re.split(r'\t+| {2,}', line.strip(), maxsplit=1)
                                 if len(parts) >= 2:
                                     grapheme = parts[0].lower()
                                     phoneme_parts = parts[1:]
@@ -88,21 +85,21 @@ class G2pTester:
                                     loaded_dict = True
                                 else:
                                     print(Fore.YELLOW + f"Ignoring line: {line.strip()}")
-                        break  # Exit encoding loop if successful
+                        break
                     except Exception as e:
                         print(Fore.YELLOW + f"Failed to load {dict_path} with encoding {encoding}. Trying next encoding.")
-                        continue  # Try the next encoding
+                        continue 
             else:
                 print(Fore.RED + f"Dictionary file not found: {dict_path}")
 
         # Check if the ONNX model path is provided and not "null"
         if self.onnx_path != "null":
             try:
-                print(Fore.GREEN + f"Loading ONNX model from: {self.onnx_path}")
+                print(Fore.GREEN + f"\nLoading ONNX model from: {self.onnx_path}")
                 self.session = ort.InferenceSession(P(self.onnx_path))
                 loaded_model = True
             except Exception as e:
-                print(Fore.RED + f"Failed to load ONNX model: {e}")
+                print(Fore.RED + f"\nFailed to load ONNX model: {e}")
 
         # Error handling for missing resources
         if not loaded_dict and self.onnx_path == "null":
@@ -164,7 +161,7 @@ class G2pTester:
                 break
             elif grapheme_input.lower() == 'change':
                 print(Fore.CYAN + "Switching model...\n")
-                self.load_config()  # Reload model selection
+                self.load_config()
             else:
                 # Use split_input if enabled
                 if self.split_character:
@@ -228,5 +225,4 @@ class G2pTester:
             print(Fore.RED + "Error in prediction:", traceback.format_exc())
             return ""
 
-# Initialize and run
 G2pTester()
