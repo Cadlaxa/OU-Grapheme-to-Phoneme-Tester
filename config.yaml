@@ -6,8 +6,8 @@
   # do not remove
   graphemes: ["", "", "", "", "'", "-", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"]
   phonemes: ["", "", "", "", "aa", "ae", "ah", "ao", "aw", "ax", "ay", "b", "ch", "d", "dh", "dr", "dx", "eh", "er", "ey", "f", "g", "hh", "ih", "iy", "jh", "k", "l", "m", "n", "ng", "ow", "oy", "p", "q", "r", "s", "sh", "t", "th", "tr", "uh", "uw", "v", "w", "y", "z", "zh"]
-  dict_path: "./g2p-en-arpa+/dict.txt"
-  onnx_path: "./g2p-en-arpa+/g2p.onnx"
+  dict_path: "./models/g2p-en-arpa+/dict.txt"
+  onnx_path: "./models/g2p-en-arpa+/g2p.onnx"
   split_character: false
 
 - model_name: "JP Monophone"
@@ -36,10 +36,10 @@
             "gy", "h", "hy", "i", "j", "k", "kw", "ky", "m", "my", "n",
             "ng", "ngy", "ny", "o", "p", "py", "r", "ry", "s", "sh", "t", "ts",
             "ty", "u", "v", "w", "y", "z"]
-  dict_path: ["./g2p-jp-mono/katakana.txt",
-              "./g2p-jp-mono/romaji.txt",
-              "./g2p-jp-mono/special.txt",
-              ./g2p-jp-mono/hiragana.txt]
+  dict_path: ["./models/g2p-jp-mono/katakana.txt",
+              "./models/g2p-jp-mono/romaji.txt",
+              "./models/g2p-jp-mono/special.txt",
+              ./models/g2p-jp-mono/hiragana.txt]
   onnx_path: "null"
   split_character: true
 
@@ -55,6 +55,6 @@
              "l", "lh", "m", "n", "ng", "oh", "ow0", "ow1", "ow2", "oy0", "oy1", "oy2", 
              "p", "r", "rh", "s", "sh", "t", "th", "tr", "uh0", "uh1", "uh2", "uw0", 
              "uw1", "uw2", "ux", "v", "w", "y", "z", "zh"]
-  dict_path: "./g2p-en-arpa-new/dict.txt"
-  onnx_path: "./g2p-en-arpa-new/g2p.onnx"
+  dict_path: "./models/g2p-en-arpa-new/dict.txt"
+  onnx_path: "./models/g2p-en-arpa-new/g2p.onnx"
   split_character: false

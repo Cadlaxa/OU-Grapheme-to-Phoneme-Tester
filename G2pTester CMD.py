@@ -1,24 +1,25 @@
-import onnxruntime as ort
-import numpy as np
-from collections import defaultdict
-import traceback
 import sys
-import ruamel.yaml
-from pathlib import Path as P
-from colorama import Fore, Style, init
 import re
+import traceback
+from collections import defaultdict
+from pathlib import Path as P
+import numpy as np
+import onnxruntime as ort
+import ruamel.yaml
+from colorama import Fore, Style, init
 
 init(autoreset=True)
 
 class G2pTester:
     def __init__(self, config_path='config.yaml'):
-        self.lock = None  # Placeholder for thread safety if needed
+        self.lock = None
         self.dict = {}
         self.grapheme_indexes = {}
         self.pred_cache = defaultdict(list)
         self.session = None
         self.config_path = config_path 
         self.split_character = False
+        self.is_autoregressive = False
         self.load_config()
         self.prompt_for_grapheme()
 
@@ -31,8 +32,9 @@ class G2pTester:
                 with open(self.config_path, 'r', encoding=encoding) as f:
                     config = yaml.load(f)
                 break 
-            except Exception as e:
+            except Exception:
                 continue 
+
         if config is None:
             print(Fore.RED + "Failed to load configuration file with supported encodings.")
             sys.exit(1)
@@ -52,23 +54,22 @@ class G2pTester:
             except ValueError:
                 print(Fore.RED + "Invalid input. Please enter a number.")
 
-        # Load selected model's configuration
         self.graphemes = selected_model['graphemes']
         self.phonemes = selected_model['phonemes'][4:]  # Skip initial placeholder phonemes
         self.dict_path = selected_model['dict_path']
         self.onnx_path = selected_model['onnx_path']
         self.split_character = selected_model.get('split_character', False)
-        self.load_pack()  # Load dictionary and model for the selected configuration
+        self.load_pack()
 
     def load_pack(self):
         loaded_dict = False
         loaded_model = False
+        self.dict.clear()
+        self.pred_cache.clear()
         encodings = ['utf-8', 'utf-16', 'utf-8-sig', 'shift-jis', 'iso-8859-1']
 
-        # Ensure dict_paths is always a list
         dict_paths = self.dict_path if isinstance(self.dict_path, list) else [self.dict_path]
 
-        # Load dictionary from multiple files
         for dict_path_str in dict_paths:
             dict_path = P(dict_path_str)
             if dict_path.exists():
@@ -80,28 +81,34 @@ class G2pTester:
                                 if len(parts) >= 2:
                                     grapheme = parts[0].lower()
                                     phoneme_parts = parts[1:]
-                                    phonemes = ''.join(phoneme_parts).lower()
+                                    # Strip stress digits (0-3) if present in dictionary
+                                    phonemes = re.sub(r'[0-3]', '', ''.join(phoneme_parts)).lower()
                                     self.dict[grapheme] = phonemes.split()
                                     loaded_dict = True
                                 else:
                                     print(Fore.YELLOW + f"Ignoring line: {line.strip()}")
                         break
-                    except Exception as e:
+                    except Exception:
                         print(Fore.YELLOW + f"Failed to load {dict_path} with encoding {encoding}. Trying next encoding.")
                         continue 
             else:
                 print(Fore.RED + f"Dictionary file not found: {dict_path}")
 
-        # Check if the ONNX model path is provided and not "null"
         if self.onnx_path != "null":
             try:
                 print(Fore.GREEN + f"\nLoading ONNX model from: {self.onnx_path}")
                 self.session = ort.InferenceSession(P(self.onnx_path))
+                
+                # Detect model type based on ONNX session input signatures
+                input_names = [inp.name for inp in self.session.get_inputs()]
+                self.is_autoregressive = ('tgt' in input_names and 't' in input_names)
+                
+                model_type_str = "Autoregressive (Legacy)" if self.is_autoregressive else "End-to-End (New)"
+                print(Fore.CYAN + f"Detected model architecture: {model_type_str}")
                 loaded_model = True
             except Exception as e:
                 print(Fore.RED + f"\nFailed to load ONNX model: {e}")
 
-        # Error handling for missing resources
         if not loaded_dict and self.onnx_path == "null":
             print(Fore.RED + "Both dictionary and ONNX model paths are null. Exiting...")
             sys.exit(1)
@@ -110,7 +117,6 @@ class G2pTester:
         elif not loaded_model:
             print(Fore.YELLOW + "No valid ONNX model loaded, but dictionary will be used.")
 
-        # Create grapheme indexes (skip the first four graphemes)
         self.grapheme_indexes = {g: i + 4 for i, g in enumerate(self.graphemes[4:])}
 
     def split_input(self, input_text):
@@ -119,9 +125,8 @@ class G2pTester:
         result = []
         i = 0
         while i < len(input_text):
-            # Check for multi-character Hiragana/Katakana graphemes
             found = False
-            for length in range(3, 1, -1):  # Check for 3, 2 character graphemes
+            for length in range(3, 1, -1):
                 if i + length <= len(input_text) and input_text[i:i+length] in self.dict:
                     result.append(input_text[i:i+length])
                     i += length
@@ -163,7 +168,6 @@ class G2pTester:
                 print(Fore.CYAN + "Switching model...\n")
                 self.load_config()
             else:
-                # Use split_input if enabled
                 if self.split_character:
                     grapheme_input = self.split_input(grapheme_input)
                 phonemes = self.predict(grapheme_input)
@@ -184,36 +188,76 @@ class G2pTester:
                     predicted_phoneme = self.predict_with_model(word)
                     if predicted_phoneme:
                         predicted_phonemes.append(predicted_phoneme)
-                        self.pred_cache[word_lower] = predicted_phoneme.split()  # Cache the result
+                        self.pred_cache[word_lower] = predicted_phoneme.split()
                     else:
                         print(Fore.RED + f"Error in prediction for '{word}'")
                         predicted_phonemes.append("N/A")
         return '] ['.join(predicted_phonemes)
 
     def predict_with_model(self, word):
-        # 1. Convert word characters to grapheme IDs
-        # Use UNK_IDX (1) if a character isn't in the dictionary
+        if self.session is None:
+            return ""
+
+        if self.is_autoregressive:
+            return self._predict_autoregressive(word)
+        else:
+            return self._predict_end_to_end(word)
+
+    def _predict_end_to_end(self, word):
+        """Inference logic for new single-pass end-to-end models."""
         input_ids = [self.grapheme_indexes.get(c, 1) for c in word]
-        
-        # 2. Format as a 2D numpy array: shape (1, Sequence Length)
         src = np.array([input_ids], dtype=np.int32)
 
-        try: 
-            # 3. Run the modern end-to-end model (it only needs 'src' as input!)
+        try:
             ort_inputs = {'src': src}
             outputs = self.session.run(None, ort_inputs)
-            tgt = outputs[0] # Returns an array of predicted IDs
+            tgt = outputs[0]
 
-            # 4. Convert output IDs back to phoneme strings
             predicted_phonemes = []
             for id in tgt.flatten():
-                if id > 3: # Skip special tokens (0=pad, 1=unk, 2=bos, 3=eos)
+                if id > 3 and (id - 4) < len(self.phonemes):
                     predicted_phonemes.append(self.phonemes[id - 4])
-                    
+
             return ' '.join(predicted_phonemes)
-            
-        except Exception as e:
+        except Exception:
             print(Fore.RED + "Error in prediction:", traceback.format_exc())
             return ""
 
-G2pTester()
+    def _predict_autoregressive(self, word):
+        """Inference logic for legacy autoregressive models requiring iterative decoding."""
+        word_with_dash = "-" + word
+        input_ids = np.array([self.grapheme_indexes.get(c, 0) for c in word_with_dash], dtype=np.int32)
+        input_length = len(input_ids)
+
+        if len(input_ids.shape) == 1:
+            input_ids = np.expand_dims(input_ids, axis=0)
+
+        t = np.ones((1,), dtype=np.int32)
+        src = input_ids
+        tgt = np.array([[2]], dtype=np.int32)
+
+        try:
+            while t[0] < input_length and tgt.shape[1] < 48:
+                input_feed = {'src': src, 'tgt': tgt, 't': t}
+                outputs = self.session.run(['pred'], input_feed)
+                pred = outputs[0].flatten().astype(int)
+                if pred != 2:
+                    new_tgt = np.zeros((tgt.shape[0], tgt.shape[1] + 1), dtype=np.int32)
+                    new_tgt[:, :tgt.shape[1]] = tgt
+                    new_tgt[:, tgt.shape[1]] = pred
+                    tgt = new_tgt
+                else:
+                    t[0] += 1
+
+            predicted_phonemes = [
+                self.phonemes[id - 4] 
+                for id in tgt.flatten().astype(int) 
+                if id != 2 and 0 <= (id - 4) < len(self.phonemes)
+            ]
+            return ' '.join(predicted_phonemes)
+        except Exception:
+            print(Fore.RED + "Error in prediction:", traceback.format_exc())
+            return ""
+
+if __name__ == "__main__":
+    G2pTester()

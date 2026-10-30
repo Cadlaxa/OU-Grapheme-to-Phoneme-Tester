@@ -1,0 +1,110 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:G2P"
+        mc:Ignorable="d" d:DesignWidth="750" d:DesignHeight="600"
+        Width="750" Height="600"
+        x:Class="G2P.MainWindow"
+        Title="G2P Neural Model Tester"
+        WindowStartupLocation="CenterScreen"
+        Background="#F5EFD4">
+
+    <Window.Styles>
+        <!-- Custom Input & ComboBox Styling -->
+        <Style Selector="TextBox">
+            <Setter Property="Background" Value="#FDFBF2"/>
+            <Setter Property="Foreground" Value="#804D1C"/>
+            <Setter Property="BorderBrush" Value="#E6847C"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="Padding" Value="10,8"/>
+        </Style>
+        <Style Selector="ComboBox">
+            <Setter Property="Background" Value="#FDFBF2"/>
+            <Setter Property="Foreground" Value="#804D1C"/>
+            <Setter Property="BorderBrush" Value="#E6847C"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="Padding" Value="10,6"/>
+        </Style>
+        <Style Selector="CheckBox">
+            <Setter Property="Foreground" Value="#804D1C"/>
+        </Style>
+    </Window.Styles>
+
+    <Grid RowDefinitions="Auto, Auto, Auto, *, Auto" Margin="20">
+        
+        <!-- Config File Picker Toolbar -->
+        <Border Grid.Row="0" Background="#E3DBBA" BorderBrush="#E6847C" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,0,12">
+            <Grid ColumnDefinitions="*, Auto">
+                <StackPanel Grid.Column="0" Spacing="4" VerticalAlignment="Center">
+                    <TextBlock Text="Configuration File" FontWeight="Bold" Foreground="#B2742E" FontSize="11"/>
+                    <TextBlock x:Name="ConfigPathLabel" Text="config.yaml" Foreground="#804D1C" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                </StackPanel>
+                <Button Grid.Column="1" Content="Browse Config..." Click="OnBrowseConfigClicked" 
+                        Background="#FF938A" Foreground="White" FontWeight="Bold" CornerRadius="6" Padding="12,8" VerticalAlignment="Center"/>
+            </Grid>
+        </Border>
+
+        <!-- Model Selector & Architecture Badge -->
+        <Border Grid.Row="1" Background="#E3DBBA" BorderBrush="#E6847C" BorderThickness="1" CornerRadius="8" Padding="15" Margin="0,0,0,15">
+            <StackPanel Spacing="6">
+                <!-- Header Label -->
+                <TextBlock Text="Select G2P Model" FontWeight="Bold" Foreground="#804D1C" FontSize="13"/>
+                
+                <!-- Controls Row -->
+                <Grid ColumnDefinitions="*, Auto">
+                    <ComboBox x:Name="ModelComboBox" 
+                            Grid.Column="0"
+                            HorizontalAlignment="Stretch" 
+                            SelectionChanged="OnModelSelectionChanged">
+                        <ComboBox.ItemTemplate>
+                            <DataTemplate x:DataType="local:ModelConfig">
+                                <TextBlock Text="{Binding model_name}" Foreground="#804D1C" FontWeight="Medium"/>
+                            </DataTemplate>
+                        </ComboBox.ItemTemplate>
+                    </ComboBox>
+
+                    <Border Grid.Column="1" 
+                            Margin="12,0,0,0" 
+                            Padding="12,6" 
+                            VerticalAlignment="Center" 
+                            CornerRadius="6" 
+                            x:Name="ModelTypeBadge" 
+                            Background="#E2DAC3">
+                        <TextBlock x:Name="ModelTypeLabel" 
+                                Text="No Model Loaded" 
+                                Foreground="#804D1C" 
+                                FontWeight="Bold" 
+                                FontSize="12"/>
+                    </Border>
+                </Grid>
+            </StackPanel>
+        </Border>
+
+        <!-- Input Section -->
+        <StackPanel Grid.Row="2" Spacing="8" Margin="0,0,0,15">
+            <TextBlock Text="Input Grapheme / Text" Foreground="#804D1C" FontWeight="Bold" FontSize="13"/>
+            <TextBox x:Name="GraphemeInput" 
+                     Watermark="Enter grapheme or sentence..." 
+                     FontSize="14" 
+                     TextChanged="OnInputTextChanged"/>
+            <CheckBox x:Name="SplitCharacterCheckBox" Content="Enable Split Character Processing" 
+                      IsCheckedChanged="OnSplitCharacterToggled"/>
+        </StackPanel>
+
+        <!-- Output Section -->
+        <Grid Grid.Row="3" RowDefinitions="Auto, *">
+            <TextBlock Grid.Row="0" Text="Phoneme Prediction" Foreground="#804D1C" FontWeight="Bold" FontSize="13" Margin="0,0,0,8"/>
+            <TextBox Grid.Row="1" x:Name="PhonemeOutput" 
+                     IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" 
+                     Background="#FDFBF2" Foreground="#0B332D" BorderBrush="#25B19C" BorderThickness="1.5"
+                     FontSize="16" FontFamily="Consolas, Monospace" Padding="12" CornerRadius="8"/>
+        </Grid>
+
+        <!-- Footer / Status Bar -->
+        <TextBlock Grid.Row="4" x:Name="StatusLog" Text="Ready" 
+                   Foreground="#B2742E" FontSize="12" FontWeight="Medium" Margin="0,10,0,0"/>
+    </Grid>
+</Window>

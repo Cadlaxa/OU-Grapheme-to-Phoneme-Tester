@@ -1,0 +1,73 @@
+## Build and Output Directories
+bin/
+obj/
+out/
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+publish/
+
+## Visual Studio / VS Code
+.vs/
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+*.user
+*.userosv
+*.suo
+*.userprefs
+*.sln.docstates
+
+## JetBrains Rider
+.idea/
+*.sln.iml
+
+## NuGet
+*.nupkg
+*.snupkg
+**/packages/*
+!**/packages/build/
+project.lock.json
+project.fragment.lock.json
+*.nuget.props
+*.nuget.targets
+
+## Test & Coverage Results
+[Tt]est[Rr]esult*
+*.trx
+coverage*.xml
+coverage*.json
+coverage*.info
+*.coverage
+*.coveragexml
+.coverage/
+
+## Operating System & System Files
+.DS_Store
+Thumbs.db
+desktop.ini
+ehthumbs.db
+
+## Crash Dumps & Logs
+*.log
+*.mdf
+*.ldf
+*.tmp
+*.bak
+logs/
+[Ll]og/
+[Ll]ogs/
+
+## Environment & Local User Settings
+*.env
+*.env.local
+appsettings.Local.json
+appsettings.Development.local.json
+secrets.json
+
+## Profiling & Performance
+*.vsp
+*.vspx
+*.sap
