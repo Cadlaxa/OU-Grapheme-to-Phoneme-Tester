@@ -240,7 +240,7 @@ public partial class MainWindow: Window {
         _session?.Dispose();
         _session = null;
 
-        // 1. Parse Dictionary Files
+        // Parse Dictionary Files
         List < string > dictPaths = _activeConfig.dict_path
         switch {
             List < object > list => list.Select(x => x.ToString() !).ToList(),
@@ -272,7 +272,6 @@ public partial class MainWindow: Window {
             }
         }
 
-        // 2. Setup Graphemes and Phonemes Lookup (using TryAdd to avoid duplicate key crashes)
         _modelPhonemes = _activeConfig.phonemes.Skip(4).ToList();
         _graphemeIndexes = new Dictionary < char, int > ();
 
@@ -286,7 +285,7 @@ public partial class MainWindow: Window {
             }
         }
 
-        // 3. Load ONNX Model and Auto-Detect Architecture
+        // Load ONNX Model and Auto-Detect Architecture
         bool loadedModel = false;
         string resolvedOnnxPath = ResolveRelativePath(_activeConfig.onnx_path);
 
@@ -307,9 +306,9 @@ public partial class MainWindow: Window {
 
                 // Pastel Badge Styling matching cad_pastel palette
                 ModelTypeBadge.Background = _isAutoregressive ?
-                    new SolidColorBrush(Color.Parse("#EF8331")) // Amber/Orange
+                    new SolidColorBrush(Color.Parse("#EF8331"))
                     :
-                    new SolidColorBrush(Color.Parse("#25B19C")); // Teal
+                    new SolidColorBrush(Color.Parse("#25B19C"));
             } catch (Exception ex) {
                 Log.Error(ex, "Failed to load ONNX model from {Path}", resolvedOnnxPath);
                 StatusLog.Text = $"ONNX Load Error: {ex.Message}";

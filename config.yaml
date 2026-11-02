@@ -58,3 +58,12 @@
   dict_path: "./models/g2p-en-arpa-new/dict.txt"
   onnx_path: "./models/g2p-en-arpa-new/g2p.onnx"
   split_character: false
+
+- model_name: "Filipino"
+  # the 4 blank characters here are important
+  # do not remove
+  graphemes: ["", "", "", "", "'", "-", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "ñ", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "Ñ", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"]
+  phonemes: ["", "", "", "", "a", "aw", "ay", "b", "ch", "d", "dy", "e", "@r", "ey", "ew", "f", "g", "h", "i", "iw", "j", "k", "l", "ll", "m", "n", "ng", "o", "ow", "oy", "p", "q", "r", "rr", "s", "sh", "sy", "t", "u", "uy", "v", "w", "y", "z"]
+  dict_path: "./models/g2p-fil/filipino.txt"
+  onnx_path: "./models/g2p-fil/g2p.onnx"
+  split_character: false
