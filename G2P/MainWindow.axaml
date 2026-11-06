@@ -3,15 +3,14 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:G2P"
-        mc:Ignorable="d" d:DesignWidth="750" d:DesignHeight="600"
-        Width="750" Height="600"
+        mc:Ignorable="d" d:DesignWidth="850" d:DesignHeight="600"
+        Width="850" Height="600"
         x:Class="G2P.MainWindow"
         Title="G2P Neural Model Tester"
         WindowStartupLocation="CenterScreen"
         Background="#F5EFD4">
 
     <Window.Styles>
-        <!-- Custom Input & ComboBox Styling -->
         <Style Selector="TextBox">
             <Setter Property="Background" Value="#FDFBF2"/>
             <Setter Property="Foreground" Value="#804D1C"/>
@@ -50,15 +49,12 @@
         <!-- Model Selector & Architecture Badge -->
         <Border Grid.Row="1" Background="#E3DBBA" BorderBrush="#E6847C" BorderThickness="1" CornerRadius="8" Padding="15" Margin="0,0,0,15">
             <StackPanel Spacing="6">
-                <!-- Header Label -->
                 <TextBlock Text="Select G2P Model" FontWeight="Bold" Foreground="#804D1C" FontSize="13"/>
-                
-                <!-- Controls Row -->
                 <Grid ColumnDefinitions="*, Auto">
                     <ComboBox x:Name="ModelComboBox" 
-                            Grid.Column="0"
-                            HorizontalAlignment="Stretch" 
-                            SelectionChanged="OnModelSelectionChanged">
+                              Grid.Column="0"
+                              HorizontalAlignment="Stretch" 
+                              SelectionChanged="OnModelSelectionChanged">
                         <ComboBox.ItemTemplate>
                             <DataTemplate x:DataType="local:ModelConfig">
                                 <TextBlock Text="{Binding model_name}" Foreground="#804D1C" FontWeight="Medium"/>
@@ -74,10 +70,10 @@
                             x:Name="ModelTypeBadge" 
                             Background="#E2DAC3">
                         <TextBlock x:Name="ModelTypeLabel" 
-                                Text="No Model Loaded" 
-                                Foreground="#804D1C" 
-                                FontWeight="Bold" 
-                                FontSize="12"/>
+                                   Text="No Model Loaded" 
+                                   Foreground="#804D1C" 
+                                   FontWeight="Bold" 
+                                   FontSize="12"/>
                     </Border>
                 </Grid>
             </StackPanel>
@@ -94,13 +90,90 @@
                       IsCheckedChanged="OnSplitCharacterToggled"/>
         </StackPanel>
 
-        <!-- Output Section -->
+        <!-- Output Section: One Box per Note with Colored Phoneme Text -->
         <Grid Grid.Row="3" RowDefinitions="Auto, *">
             <TextBlock Grid.Row="0" Text="Phoneme Prediction" Foreground="#804D1C" FontWeight="Bold" FontSize="13" Margin="0,0,0,8"/>
-            <TextBox Grid.Row="1" x:Name="PhonemeOutput" 
-                     IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" 
-                     Background="#FDFBF2" Foreground="#0B332D" BorderBrush="#25B19C" BorderThickness="1.5"
-                     FontSize="16" FontFamily="Consolas, Monospace" Padding="12" CornerRadius="8"/>
+            
+            <Grid Grid.Row="1" ColumnDefinitions="*, 230">
+                
+                <!-- Left: OpenUtau Note Boxes Container -->
+                <Border Grid.Column="0" Background="#FDFBF2" BorderBrush="#25B19C" BorderThickness="1.5" CornerRadius="8" Padding="12" Margin="0,0,12,0">
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                        <ItemsControl x:Name="PhonemesItemsControl">
+                            <ItemsControl.ItemsPanel>
+                                <ItemsPanelTemplate>
+                                    <WrapPanel Orientation="Horizontal"/>
+                                </ItemsPanelTemplate>
+                            </ItemsControl.ItemsPanel>
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="local:NoteBoxModel">
+                                    <!-- One Box per Note/Word -->
+                                    <Border Background="#F5EFD4" 
+                                            BorderBrush="#E6847C" 
+                                            BorderThickness="1.5" 
+                                            CornerRadius="8" 
+                                            Padding="12,8" 
+                                            Margin="4,5"
+                                            VerticalAlignment="Center">
+                                        <StackPanel Spacing="4">
+                                            <!-- Note / Word Header -->
+                                            <TextBlock Text="{Binding Word}" 
+                                                       Foreground="#B2742E" 
+                                                       FontSize="11" 
+                                                       FontWeight="Bold" 
+                                                       HorizontalAlignment="Center"/>
+                                            
+                                            <!-- Phonemes Sequence inside Note Box (Colored Text) -->
+                                            <ItemsControl ItemsSource="{Binding Phonemes}">
+                                                <ItemsControl.ItemsPanel>
+                                                    <ItemsPanelTemplate>
+                                                        <StackPanel Orientation="Horizontal" Spacing="6"/>
+                                                    </ItemsPanelTemplate>
+                                                </ItemsControl.ItemsPanel>
+                                                <ItemsControl.ItemTemplate>
+                                                    <DataTemplate x:DataType="local:PhonemeTextModel">
+                                                        <TextBlock Text="{Binding Phoneme}" 
+                                                                   Foreground="{Binding Foreground}" 
+                                                                   FontWeight="Bold" 
+                                                                   FontSize="20" 
+                                                                   FontFamily="Consolas, Monospace"
+                                                                   VerticalAlignment="Center">
+                                                            <ToolTip.Tip>
+                                                                <TextBlock Text="{Binding TypeName}"/>
+                                                            </ToolTip.Tip>
+                                                        </TextBlock>
+                                                    </DataTemplate>
+                                                </ItemsControl.ItemTemplate>
+                                            </ItemsControl>
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </ScrollViewer>
+                </Border>
+
+                <!-- Right: Phoneme Types Legend Box -->
+                <Border Grid.Column="1" Background="#E3DBBA" BorderBrush="#E6847C" BorderThickness="1" CornerRadius="8" Padding="12">
+                    <Grid RowDefinitions="Auto, *">
+                        <TextBlock Grid.Row="0" Text="Phoneme Types" FontWeight="Bold" Foreground="#804D1C" FontSize="16" Margin="0,0,0,10"/>
+                        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
+                            <ItemsControl x:Name="PhonemeTypesLegendControl">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate x:DataType="local:PhonemeTypeLegendModel">
+                                        <Grid ColumnDefinitions="Auto, *, Auto" Margin="0,4">
+                                            <Border Grid.Column="0" Width="14" Height="14" CornerRadius="4" Background="{Binding BadgeColor}" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                            <TextBlock Grid.Column="1" Text="{Binding TypeName}" Foreground="#804D1C" FontSize="11" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                            <TextBlock Grid.Column="2" Text="{Binding Count}" Foreground="#B2742E" FontSize="11" FontWeight="Bold" VerticalAlignment="Center"/>
+                                        </Grid>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </Grid>
+                </Border>
+
+            </Grid>
         </Grid>
 
         <!-- Footer / Status Bar -->

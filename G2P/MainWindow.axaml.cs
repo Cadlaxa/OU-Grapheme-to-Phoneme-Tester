@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
 using System.Text;
@@ -38,6 +39,10 @@ public class ModelConfig {
         get;
         set;
     } = string.Empty;
+    public string phones_path {
+        get;
+        set;
+    } = string.Empty;
     public bool split_character {
         get;
         set;
@@ -59,6 +64,61 @@ public class AppSettings {
     }
 }
 
+public enum PhonemeCategory {
+    Vowel,
+    Stop,
+    Affricate,
+    Fricative,
+    Nasal,
+    Semivowel,
+    Liquid,
+    Tap,
+    Aspirate,
+    Separator,
+    Unknown
+}
+
+public class PhonemeTextModel {
+    public string Phoneme {
+        get;
+        set;
+    } = string.Empty;
+    public string TypeName {
+        get;
+        set;
+    } = string.Empty;
+    public IBrush Foreground {
+        get;
+        set;
+    } = Brushes.Black;
+}
+
+public class NoteBoxModel {
+    public string Word {
+        get;
+        set;
+    } = string.Empty;
+    public ObservableCollection < PhonemeTextModel > Phonemes {
+        get;
+        set;
+    } = new();
+}
+
+public class PhonemeTypeLegendModel {
+    public string TypeName {
+        get;
+        set;
+    } = string.Empty;
+    public IBrush BadgeColor {
+        get;
+        set;
+    } = Brushes.Gray;
+    public int Count {
+        get;
+        set;
+    }
+}
+
 public partial class MainWindow: Window {
     private List < ModelConfig > _configs = new();
     private ModelConfig ? _activeConfig;
@@ -75,8 +135,16 @@ public partial class MainWindow: Window {
     private List < string > _modelPhonemes = new();
     private readonly Dictionary < string, List < string >> _predCache = new();
 
+    private readonly Dictionary < string, string > _modelPhoneTypes = new(StringComparer.OrdinalIgnoreCase);
+
+    private readonly ObservableCollection < NoteBoxModel > _noteCollection = new();
+    private readonly ObservableCollection < PhonemeTypeLegendModel > _legendCollection = new();
+
     public MainWindow() {
         InitializeComponent();
+
+        PhonemesItemsControl.ItemsSource = _noteCollection;
+        PhonemeTypesLegendControl.ItemsSource = _legendCollection;
 
         LoadSettingsAndInitialize();
         _isInitializing = false;
@@ -237,10 +305,10 @@ public partial class MainWindow: Window {
 
         _dictionary.Clear();
         _predCache.Clear();
+        _modelPhoneTypes.Clear();
         _session?.Dispose();
         _session = null;
 
-        // Parse Dictionary Files
         List < string > dictPaths = _activeConfig.dict_path
         switch {
             List < object > list => list.Select(x => x.ToString() !).ToList(),
@@ -272,6 +340,8 @@ public partial class MainWindow: Window {
             }
         }
 
+        LoadPhonesTxtForActiveModel(dictPaths);
+
         _modelPhonemes = _activeConfig.phonemes.Skip(4).ToList();
         _graphemeIndexes = new Dictionary < char, int > ();
 
@@ -285,7 +355,6 @@ public partial class MainWindow: Window {
             }
         }
 
-        // Load ONNX Model and Auto-Detect Architecture
         bool loadedModel = false;
         string resolvedOnnxPath = ResolveRelativePath(_activeConfig.onnx_path);
 
@@ -304,10 +373,8 @@ public partial class MainWindow: Window {
                 ModelTypeLabel.Text = archType;
                 ModelTypeLabel.Foreground = Brushes.White;
 
-                // Pastel Badge Styling matching cad_pastel palette
                 ModelTypeBadge.Background = _isAutoregressive ?
-                    new SolidColorBrush(Color.Parse("#EF8331"))
-                    :
+                    new SolidColorBrush(Color.Parse("#EF8331")) :
                     new SolidColorBrush(Color.Parse("#25B19C"));
             } catch (Exception ex) {
                 Log.Error(ex, "Failed to load ONNX model from {Path}", resolvedOnnxPath);
@@ -323,14 +390,91 @@ public partial class MainWindow: Window {
             ModelTypeBadge.Background = new SolidColorBrush(Color.Parse("#E2DAC3"));
         }
 
-        StatusLog.Text = $"Loaded model '{_activeConfig.model_name}' (Dict: {loadedDict}, ONNX: {loadedModel})";
+        StatusLog.Text = $"Loaded model '{_activeConfig.model_name}' (Dict: {loadedDict}, ONNX: {loadedModel}, Phones.txt: {_modelPhoneTypes.Count > 0})";
 
         ExecutePrediction();
     }
 
-    private void OnInputTextChanged(object ? sender, TextChangedEventArgs e) {
-        ExecutePrediction();
+    private void LoadPhonesTxtForActiveModel(List < string > dictPaths) {
+        string ? phonesFileToLoad = null;
+
+        if (!string.IsNullOrEmpty(_activeConfig?.phones_path)) {
+            string candidate = ResolveRelativePath(_activeConfig.phones_path);
+            if (File.Exists(candidate)) phonesFileToLoad = candidate;
+        }
+
+        if (phonesFileToLoad == null && !string.IsNullOrEmpty(_activeConfig?.onnx_path) && _activeConfig.onnx_path != "null") {
+            string onnxPath = ResolveRelativePath(_activeConfig.onnx_path);
+            string ? dir = Path.GetDirectoryName(onnxPath);
+            if (!string.IsNullOrEmpty(dir)) {
+                string candidate = Path.Combine(dir, "phones.txt");
+                if (File.Exists(candidate)) phonesFileToLoad = candidate;
+            }
+        }
+
+        if (phonesFileToLoad == null && dictPaths.Count > 0) {
+            string dictPath = ResolveRelativePath(dictPaths[0]);
+            string ? dir = Path.GetDirectoryName(dictPath);
+            if (!string.IsNullOrEmpty(dir)) {
+                string candidate = Path.Combine(dir, "phones.txt");
+                if (File.Exists(candidate)) phonesFileToLoad = candidate;
+            }
+        }
+
+        if (phonesFileToLoad != null) {
+            ParsePhonesTxt(phonesFileToLoad);
+            Log.Information("Successfully loaded {Count} phoneme type rules from {Path}", _modelPhoneTypes.Count, phonesFileToLoad);
+        } else {
+            Log.Information("No phones.txt found for model '{ModelName}'. Falling back to default categorizer.", _activeConfig?.model_name);
+        }
     }
+
+    private void ParsePhonesTxt(string filePath) {
+        var knownCategoryNames = new HashSet < string > (StringComparer.OrdinalIgnoreCase) {
+            "vowel",
+            "stop",
+            "plosive",
+            "affricate",
+            "fricative",
+            "nasal",
+            "semivowel",
+            "glide",
+            "liquid",
+            "tap",
+            "flap",
+            "aspirate",
+            "consonant"
+        };
+
+        foreach(var rawLine in File.ReadLines(filePath)) {
+            string line = rawLine.Trim();
+            if (string.IsNullOrWhiteSpace(line) || line.StartsWith("#") || line.StartsWith("//"))
+                continue;
+
+            var tokens = Regex.Split(line, @"\t+| +").Where(t => !string.IsNullOrWhiteSpace(t)).ToArray();
+            if (tokens.Length < 2) continue;
+
+            if (knownCategoryNames.Contains(tokens[0])) {
+                string category = Capitalize(tokens[0]);
+                for (int i = 1; i < tokens.Length; i++) {
+                    _modelPhoneTypes[tokens[i].ToLower()] = category;
+                }
+            } else if (knownCategoryNames.Contains(tokens[1])) {
+                string phoneme = tokens[0].ToLower();
+                string category = Capitalize(tokens[1]);
+                _modelPhoneTypes[phoneme] = category;
+            } else if (tokens.Length == 2) {
+                _modelPhoneTypes[tokens[0].ToLower()] = Capitalize(tokens[1]);
+            }
+        }
+    }
+
+    private static string Capitalize(string input) {
+        if (string.IsNullOrEmpty(input)) return input;
+        return char.ToUpper(input[0]) + input.Substring(1).ToLower();
+    }
+
+    private void OnInputTextChanged(object ? sender, TextChangedEventArgs e) => ExecutePrediction();
 
     private void OnSplitCharacterToggled(object ? sender, RoutedEventArgs e) {
         bool isEnabled = SplitCharacterCheckBox.IsChecked ?? false;
@@ -343,18 +487,20 @@ public partial class MainWindow: Window {
     }
 
     private void ExecutePrediction() {
-        string input = GraphemeInput.Text?.Trim() ?? string.Empty;
-        if (string.IsNullOrEmpty(input)) {
-            PhonemeOutput.Text = string.Empty;
+        string rawInput = GraphemeInput.Text?.Trim() ?? string.Empty;
+        _noteCollection.Clear();
+
+        if (string.IsNullOrEmpty(rawInput)) {
+            UpdateLegendCounts(new List < string > ());
             return;
         }
 
-        if (_activeConfig?.split_character == true) {
-            input = SplitInput(input);
-        }
+        string processedInput = (_activeConfig?.split_character == true) ?
+            SplitInput(rawInput) :
+            rawInput;
 
-        string result = Predict(input);
-        PhonemeOutput.Text = $"[{result}]";
+        string rawPhonemeString = Predict(processedInput);
+        RenderNoteBoxes(processedInput, rawPhonemeString);
     }
 
     private string Predict(string inputText) {
@@ -383,10 +529,152 @@ public partial class MainWindow: Window {
         return string.Join("] [", predictedPhonemes);
     }
 
-    private string PredictWithModel(string word) {
-        if (_session == null) {
-            return string.Empty;
+    private void RenderNoteBoxes(string processedInputText, string rawPhonemeString) {
+        _noteCollection.Clear();
+        List < string > detectedCategoryNames = new();
+
+        string[] inputWords = processedInputText.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        string[] wordBlocks = rawPhonemeString.Split("] [", StringSplitOptions.RemoveEmptyEntries);
+
+        for (int w = 0; w < wordBlocks.Length; w++) {
+            string wordLabel = (w < inputWords.Length) ? inputWords[w] : $"Note {w + 1}";
+            string block = wordBlocks[w].Replace("[", "").Replace("]", "").Trim();
+            string[] phonemes = block.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+            var noteModel = new NoteBoxModel {
+                Word = wordLabel
+            };
+
+            foreach(var ph in phonemes) {
+                string categoryName = GetPhonemeCategoryName(ph);
+                detectedCategoryNames.Add(categoryName);
+
+                IBrush textBrush = GetCategoryTextColorByName(categoryName);
+
+                noteModel.Phonemes.Add(new PhonemeTextModel {
+                    Phoneme = ph,
+                        TypeName = categoryName,
+                        Foreground = textBrush
+                });
+            }
+
+            _noteCollection.Add(noteModel);
         }
+
+        UpdateLegendCounts(detectedCategoryNames);
+    }
+
+    private string GetPhonemeCategoryName(string phoneme) {
+        string pLower = phoneme.ToLower();
+
+        if (_modelPhoneTypes.TryGetValue(pLower, out
+                var customType)) {
+            return customType;
+        }
+
+        return CategorizePhonemeFallback(pLower).ToString();
+    }
+
+    private static PhonemeCategory CategorizePhonemeFallback(string p) {
+        if (Regex.IsMatch(p, @"^(a|i|u|e|o|aa|ae|ah|ao|aw|ax|ay|eh|er|ey|ih|iy|ow|oy|uh|uw|n|v|q)$"))
+            return PhonemeCategory.Vowel;
+
+        if (Regex.IsMatch(p, @"^(p|b|t|d|k|g|cl|q|tt|pp|kk|dd|bb|gg)$"))
+            return PhonemeCategory.Stop;
+
+        if (Regex.IsMatch(p, @"^(ch|j|ts|dz|tsh|dzh|c)$"))
+            return PhonemeCategory.Affricate;
+
+        if (Regex.IsMatch(p, @"^(f|v|th|dh|s|z|sh|zh|hy|x|h)$"))
+            return PhonemeCategory.Fricative;
+
+        if (Regex.IsMatch(p, @"^(m|n|ng|ny|n')$"))
+            return PhonemeCategory.Nasal;
+
+        if (Regex.IsMatch(p, @"^(w|y|j)$"))
+            return PhonemeCategory.Semivowel;
+
+        if (Regex.IsMatch(p, @"^(l|r)$"))
+            return PhonemeCategory.Liquid;
+
+        if (Regex.IsMatch(p, @"^(rr|dx|ry)$"))
+            return PhonemeCategory.Tap;
+
+        if (Regex.IsMatch(p, @"^(hh|h)$"))
+            return PhonemeCategory.Aspirate;
+
+        return PhonemeCategory.Unknown;
+    }
+
+    private static IBrush GetCategoryTextColorByName(string categoryName) {
+        string lower = categoryName.ToLowerInvariant();
+
+        if (lower.Contains("vowel"))
+            return new SolidColorBrush(Color.Parse("#209988")); // Pastel Teal
+
+        if (lower.Contains("stop") || lower.Contains("plosive"))
+            return new SolidColorBrush(Color.Parse("#D9534F")); // Pastel Coral Red
+
+        if (lower.Contains("affricate"))
+            return new SolidColorBrush(Color.Parse("#D97706")); // Pastel Amber
+
+        if (lower.Contains("fricative"))
+            return new SolidColorBrush(Color.Parse("#B2742E")); // Warm Orange-Brown
+
+        if (lower.Contains("nasal"))
+            return new SolidColorBrush(Color.Parse("#8E44AD")); // Pastel Purple
+
+        if (lower.Contains("semivowel") || lower.Contains("glide"))
+            return new SolidColorBrush(Color.Parse("#16A085")); // Mint Turquoise
+
+        if (lower.Contains("liquid"))
+            return new SolidColorBrush(Color.Parse("#D35400")); // Deep Amber
+
+        if (lower.Contains("tap") || lower.Contains("flap"))
+            return new SolidColorBrush(Color.Parse("#C0392B")); // Soft Rose Red
+
+        if (lower.Contains("aspirate"))
+            return new SolidColorBrush(Color.Parse("#804D1C")); // Warm Ochre
+
+        // Fallback for custom categories
+        int hash = Math.Abs(categoryName.GetHashCode());
+        string[] customPalette = new [] {
+            "#209988",
+            "#D9534F",
+            "#D97706",
+            "#B2742E",
+            "#8E44AD",
+            "#16A085",
+            "#D35400",
+            "#C0392B",
+            "#804D1C"
+        };
+        return new SolidColorBrush(Color.Parse(customPalette[hash % customPalette.Length]));
+    }
+
+    private void UpdateLegendCounts(List < string > activeCategories) {
+        _legendCollection.Clear();
+
+        var defaultCategories = Enum.GetValues < PhonemeCategory > ()
+            .Where(c => c != PhonemeCategory.Separator && c != PhonemeCategory.Unknown)
+            .Select(c => c.ToString());
+
+        var allCategories = defaultCategories.Union(_modelPhoneTypes.Values).Distinct();
+
+        foreach(var catName in allCategories) {
+            int count = activeCategories.Count(c => c.Equals(catName, StringComparison.OrdinalIgnoreCase));
+            IBrush colorBrush = GetCategoryTextColorByName(catName);
+
+            _legendCollection.Add(new PhonemeTypeLegendModel {
+                TypeName = catName,
+                    BadgeColor = colorBrush,
+                    Count = count
+            });
+        }
+    }
+
+    private string PredictWithModel(string word) {
+        if (_session == null) return string.Empty;
 
         try {
             return _isAutoregressive ?
