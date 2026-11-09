@@ -34,6 +34,8 @@
     <PackageReference Include="Serilog" Version="4.2.0" />
     <PackageReference Include="Serilog.Sinks.Console" Version="6.0.0" />
     <PackageReference Include="Serilog.Sinks.File" Version="6.0.0" />
+
+    <PackageReference Include="LanguageDetection" Version="1.2.0" />
   </ItemGroup>
 
   <!-- Auto-copy config.yaml to build output directory if present -->

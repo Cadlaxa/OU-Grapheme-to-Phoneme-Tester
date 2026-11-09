@@ -90,7 +90,7 @@
                       IsCheckedChanged="OnSplitCharacterToggled"/>
         </StackPanel>
 
-        <!-- Output Section: One Box per Note with Colored Phoneme Text -->
+        <!-- Output Section: One Interactive Box per Note -->
         <Grid Grid.Row="3" RowDefinitions="Auto, *">
             <TextBlock Grid.Row="0" Text="Phoneme Prediction" Foreground="#804D1C" FontWeight="Bold" FontSize="13" Margin="0,0,0,8"/>
             
@@ -107,27 +107,48 @@
                             </ItemsControl.ItemsPanel>
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate x:DataType="local:NoteBoxModel">
-                                    <!-- One Box per Note/Word -->
+                                    <!-- One Interactive Box per Note/Word -->
                                     <Border Background="#F5EFD4" 
                                             BorderBrush="#E6847C" 
                                             BorderThickness="1.5" 
                                             CornerRadius="8" 
                                             Padding="12,8" 
                                             Margin="4,5"
-                                            VerticalAlignment="Center">
+                                            VerticalAlignment="Center"
+                                            PointerPressed="OnNoteBoxPointerPressed"
+                                            Cursor="Hand">
+                                        <ToolTip.Tip>
+                                            <StackPanel Spacing="4">
+                                                <TextBlock Text="{Binding Word, StringFormat='Word: {0}'}" FontWeight="Bold" Foreground="#804D1C"/>
+                                                <TextBlock Text="{Binding SourceModelInfo}" Foreground="#B2742E" FontSize="11" FontWeight="SemiBold"/>
+                                                <Separator Height="1" Background="#E6847C" Margin="0,2"/>
+                                                <TextBlock Text="Left-Click: Switch to Merged Model" FontSize="10" Foreground="#209988"/>
+                                                <TextBlock Text="Right-Click: Revert to Primary Model" FontSize="10" Foreground="#D9534F"/>
+                                            </StackPanel>
+                                        </ToolTip.Tip>
                                         <StackPanel Spacing="4">
-                                            <!-- Note / Word Header -->
-                                            <TextBlock Text="{Binding Word}" 
-                                                       Foreground="#B2742E" 
-                                                       FontSize="11" 
-                                                       FontWeight="Bold" 
-                                                       HorizontalAlignment="Center"/>
+                                            <!-- Note / Word Header + Model Tag -->
+                                            <Grid ColumnDefinitions="*, Auto">
+                                                <TextBlock Grid.Column="0" 
+                                                           Text="{Binding Word}" 
+                                                           Foreground="#B2742E" 
+                                                           FontSize="11" 
+                                                           FontWeight="Bold" 
+                                                           HorizontalAlignment="Left"/>
+                                                <TextBlock Grid.Column="1" 
+                                                           Text="{Binding ModelTag}" 
+                                                           Foreground="#804D1C" 
+                                                           FontSize="9" 
+                                                           FontWeight="SemiBold" 
+                                                           Margin="6,0,0,0"
+                                                           HorizontalAlignment="Right"/>
+                                            </Grid>
                                             
-                                            <!-- Phonemes Sequence inside Note Box (Colored Text) -->
+                                            <!-- Phonemes Sequence with '|' Separator -->
                                             <ItemsControl ItemsSource="{Binding Phonemes}">
                                                 <ItemsControl.ItemsPanel>
                                                     <ItemsPanelTemplate>
-                                                        <StackPanel Orientation="Horizontal" Spacing="6"/>
+                                                        <StackPanel Orientation="Horizontal" Spacing="4"/>
                                                     </ItemsPanelTemplate>
                                                 </ItemsControl.ItemsPanel>
                                                 <ItemsControl.ItemTemplate>

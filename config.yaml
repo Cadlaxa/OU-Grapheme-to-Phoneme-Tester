@@ -1,7 +1,8 @@
 # Use "null" to disable the parameter
 # use "false" to turn on and "true" to turn on the function
 
-- model_name: "En Arpa+"
+- model_name: "English"
+  language: "en"
   # the 4 blank characters here are important
   # do not remove
   graphemes: ["", "", "", "", "'", "-", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"]
@@ -11,6 +12,7 @@
   split_character: false
 
 - model_name: "JP Monophone"
+  language: "ja"
   # the 4 blank characters here are important
   # do not remove
   graphemes: ["", "", "", "", "a", "b", "c", "d", "e", "f", "g",
@@ -43,7 +45,8 @@
   onnx_path: "null"
   split_character: true
 
-- model_name: "En Arpa+ (NEW)"
+- model_name: "English+"
+  language: "en"
   # the 4 blank characters here are important
   # do not remove
   graphemes: ["", "", "", "", "'", "-", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"]
@@ -60,6 +63,8 @@
   split_character: false
 
 - model_name: "Filipino"
+  language: "tl"
+  merge_with: "English"
   # the 4 blank characters here are important
   # do not remove
   graphemes: ["", "", "", "", "'", "-", "a", "b", "c", "d", "e", "f", "g", "h", "i", "j", "k", "l", "m", "n", "ñ", "o", "p", "q", "r", "s", "t", "u", "v", "w", "x", "y", "z", "A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L", "M", "N", "Ñ", "O", "P", "Q", "R", "S", "T", "U", "V", "W", "X", "Y", "Z"]
