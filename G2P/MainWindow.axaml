@@ -79,7 +79,7 @@
             </StackPanel>
         </Border>
 
-        <!-- Input Section with Processing Options -->
+        <!-- Input Section -->
         <StackPanel Grid.Row="2" Spacing="8" Margin="0,0,0,15">
             <TextBlock Text="Input Grapheme / Text" Foreground="#804D1C" FontWeight="Bold" FontSize="13"/>
             <TextBox x:Name="GraphemeInput" 
@@ -94,14 +94,20 @@
             </StackPanel>
         </StackPanel>
 
-        <!-- Output Section: Interactive Note Cards with Candidate Variants & Model Switcher -->
+        <!-- Output Section -->
         <Grid Grid.Row="3" RowDefinitions="Auto, *">
             <TextBlock Grid.Row="0" Text="Phoneme Prediction (Click card to inspect variants, log-probabilities &amp; switch models)" Foreground="#804D1C" FontWeight="Bold" FontSize="13" Margin="0,0,0,8"/>
             
             <Grid Grid.Row="1" ColumnDefinitions="*, 230">
                 
                 <!-- Left: OpenUtau Note Boxes Container -->
-                <Border Grid.Column="0" Background="#FDFBF2" BorderBrush="#25B19C" BorderThickness="1.5" CornerRadius="8" Padding="12" Margin="0,0,12,0">
+                <Border Grid.Column="0" 
+                        Background="#FDFBF2" 
+                        BorderBrush="#25B19C" 
+                        BorderThickness="1.5" 
+                        CornerRadius="8" 
+                        Padding="12" 
+                        Margin="0,0,12,0">
                     <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                         <ItemsControl x:Name="PhonemesItemsControl">
                             <ItemsControl.ItemsPanel>
@@ -111,89 +117,132 @@
                             </ItemsControl.ItemsPanel>
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate x:DataType="local:NoteBoxModel">
-                                    <!-- Interactive Note Box -->
+                                    <!-- Note Card: VerticalAlignment="Top" keeps all card headers baseline-aligned -->
                                     <Border Background="#F5EFD4" 
                                             BorderBrush="#E6847C" 
                                             BorderThickness="1.5" 
                                             CornerRadius="8" 
-                                            Padding="12,8" 
-                                            Margin="4,5"
-                                            VerticalAlignment="Center"
+                                            Padding="10,8" 
+                                            Margin="4"
+                                            MaxWidth="600"
+                                            VerticalAlignment="Top"
                                             PointerPressed="OnNoteBoxPointerPressed"
                                             Cursor="Hand">
                                         
                                         <!-- Avalonia 12 Attached Flyout Inspector -->
                                         <FlyoutBase.AttachedFlyout>
-                                            <Flyout Placement="BottomEdgeAlignedLeft">
-                                                <Border Background="#FDFBF2" BorderBrush="#25B19C" BorderThickness="1.5" CornerRadius="10" Padding="16" Width="410">
-                                                    <StackPanel Spacing="12">
-                                                        <!-- Header Info -->
-                                                        <Grid ColumnDefinitions="*, Auto">
-                                                            <StackPanel Grid.Column="0" Spacing="2">
-                                                                <TextBlock Text="{Binding Word, StringFormat='Word: {0}'}" FontSize="15" FontWeight="Bold" Foreground="#804D1C"/>
-                                                                <TextBlock Text="{Binding SourceModelInfo}" FontSize="11" Foreground="#B2742E" FontWeight="SemiBold"/>
-                                                            </StackPanel>
-                                                            <Border Grid.Column="1" Background="#25B19C" CornerRadius="6" Padding="8,4" VerticalAlignment="Center">
-                                                                <TextBlock Text="{Binding ConfidenceText}" Foreground="White" FontSize="11" FontWeight="Bold"/>
-                                                            </Border>
-                                                        </Grid>
-
-                                                        <!-- Model Switching Buttons (Hidden when no Merged Model exists) -->
-                                                        <StackPanel Spacing="6" IsVisible="{Binding HasMergedModel}">
-                                                            <Separator Height="1" Background="#E6847C" Margin="0,0,0,4"/>
-                                                            <TextBlock Text="Model Switcher for this word:" FontSize="11" FontWeight="Bold" Foreground="#804D1C"/>
-                                                            <Grid ColumnDefinitions="*, *">
-                                                                <Button Grid.Column="0" Content="Use Primary Model" Margin="0,0,4,0" Padding="8,6" 
-                                                                        Background="#E3DBBA" Foreground="#804D1C" FontWeight="Bold" FontSize="11" CornerRadius="6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
-                                                                        Click="OnSwitchToPrimaryModelClicked" Tag="{Binding}"/>
-                                                                <Button Grid.Column="1" Content="Use Merged Model" Margin="4,0,0,0" Padding="8,6" 
-                                                                        Background="#FF938A" Foreground="White" FontWeight="Bold" FontSize="11" CornerRadius="6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
-                                                                        Click="OnSwitchToMergedModelClicked" Tag="{Binding}"/>
+                                            <Flyout Placement="BottomEdgeAlignedLeft" ShowMode="Transient">
+                                                <Border Background="#FDFBF2" 
+                                                        BorderBrush="#25B19C" 
+                                                        BorderThickness="1.5" 
+                                                        CornerRadius="10" 
+                                                        Padding="14" 
+                                                        Width="420" 
+                                                        MaxHeight="450">
+                                                    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                                                        <StackPanel Spacing="10" Margin="0,0,4,0">
+                                                            
+                                                            <!-- Header Info -->
+                                                            <Grid ColumnDefinitions="*, Auto">
+                                                                <StackPanel Grid.Column="0" Spacing="2" Margin="0,0,8,0">
+                                                                    <TextBlock Text="{Binding Word, StringFormat='Word: {0}'}" 
+                                                                            FontSize="14" 
+                                                                            FontWeight="Bold" 
+                                                                            Foreground="#804D1C" 
+                                                                            TextWrapping="Wrap"/>
+                                                                    <TextBlock Text="{Binding SourceModelInfo}" 
+                                                                            FontSize="11" 
+                                                                            Foreground="#B2742E" 
+                                                                            FontWeight="SemiBold"
+                                                                            TextWrapping="Wrap"/>
+                                                                </StackPanel>
+                                                                <Border Grid.Column="1" Background="#25B19C" CornerRadius="6" Padding="8,4" VerticalAlignment="Top">
+                                                                    <TextBlock Text="{Binding ConfidenceText}" Foreground="White" FontSize="11" FontWeight="Bold"/>
+                                                                </Border>
                                                             </Grid>
+
+                                                            <!-- Model Switcher -->
+                                                            <StackPanel Spacing="6" IsVisible="{Binding HasMergedModel}">
+                                                                <Separator Height="1" Background="#E6847C"/>
+                                                                <TextBlock Text="Model Switcher for this word:" FontSize="11" FontWeight="Bold" Foreground="#804D1C"/>
+                                                                <Grid ColumnDefinitions="*, *">
+                                                                    <Button Grid.Column="0" Content="Use Primary Model" Margin="0,0,3,0" Padding="6,6" 
+                                                                            Background="#E3DBBA" Foreground="#804D1C" FontWeight="Bold" FontSize="11" CornerRadius="6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                                                                            Click="OnSwitchToPrimaryModelClicked" Tag="{Binding}"/>
+                                                                    <Button Grid.Column="1" Content="Use Merged Model" Margin="3,0,0,0" Padding="6,6" 
+                                                                            Background="#FF938A" Foreground="White" FontWeight="Bold" FontSize="11" CornerRadius="6" HorizontalAlignment="Stretch" HorizontalContentAlignment="Center"
+                                                                            Click="OnSwitchToMergedModelClicked" Tag="{Binding}"/>
+                                                                </Grid>
+                                                            </StackPanel>
+
+                                                            <Separator Height="1" Background="#E6847C"/>
+
+                                                            <!-- Pronunciation Variants -->
+                                                            <StackPanel Spacing="6">
+                                                                <TextBlock Text="Pronunciation Variants (Click to select):" FontSize="11" FontWeight="Bold" Foreground="#804D1C"/>
+                                                                <ItemsControl ItemsSource="{Binding Alternatives}">
+                                                                    <ItemsControl.ItemTemplate>
+                                                                        <DataTemplate x:DataType="local:CandidateModel">
+                                                                            <Button HorizontalAlignment="Stretch" Margin="0,2" Padding="8,6" 
+                                                                                    Background="{Binding ButtonBackground}" 
+                                                                                    BorderBrush="#E6847C" BorderThickness="1" CornerRadius="6"
+                                                                                    Click="OnCandidateSelected" Tag="{Binding}">
+                                                                                <Grid ColumnDefinitions="Auto, *, Auto">
+                                                                                    <TextBlock Grid.Column="0" 
+                                                                                            Text="{Binding VariantLabel}" 
+                                                                                            FontSize="11" 
+                                                                                            FontWeight="Bold" 
+                                                                                            Foreground="#B2742E" 
+                                                                                            VerticalAlignment="Center" 
+                                                                                            Margin="0,0,8,0"
+                                                                                            MaxWidth="95"
+                                                                                            TextTrimming="CharacterEllipsis"/>
+                                                                                    <TextBlock Grid.Column="1" 
+                                                                                            Text="{Binding DisplayPhonemes}" 
+                                                                                            FontFamily="Consolas, Monospace" 
+                                                                                            FontWeight="Bold" 
+                                                                                            FontSize="12"
+                                                                                            Foreground="#804D1C" 
+                                                                                            VerticalAlignment="Center"
+                                                                                            TextWrapping="Wrap"
+                                                                                            Margin="0,0,8,0"/>
+                                                                                    <TextBlock Grid.Column="2" 
+                                                                                            Text="{Binding ConfidenceText}" 
+                                                                                            FontSize="11" 
+                                                                                            Foreground="#209988" 
+                                                                                            FontWeight="SemiBold" 
+                                                                                            VerticalAlignment="Center"/>
+                                                                                </Grid>
+                                                                            </Button>
+                                                                        </DataTemplate>
+                                                                    </ItemsControl.ItemTemplate>
+                                                                </ItemsControl>
+                                                            </StackPanel>
+
+                                                            <Separator Height="1" Background="#E6847C"/>
+
+                                                            <!-- Log-Probabilities Table -->
+                                                            <StackPanel Spacing="6">
+                                                                <TextBlock Text="Per-Phoneme Log-Probabilities:" FontSize="11" FontWeight="Bold" Foreground="#804D1C"/>
+                                                                <Border Background="#FDFBF2" BorderBrush="#E6847C" BorderThickness="1" CornerRadius="6" Padding="6,4" MaxHeight="130">
+                                                                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                                                        <ItemsControl ItemsSource="{Binding LogProbs}">
+                                                                            <ItemsControl.ItemTemplate>
+                                                                                <DataTemplate x:DataType="local:TokenLogProbModel">
+                                                                                    <Grid ColumnDefinitions="45, *, 55, 60" Margin="0,2">
+                                                                                        <TextBlock Grid.Column="0" Text="{Binding Phoneme}" FontFamily="Consolas, Monospace" FontWeight="Bold" Foreground="{Binding TextColor}"/>
+                                                                                        <TextBlock Grid.Column="1" Text="{Binding CategoryName}" FontSize="10" Foreground="#804D1C" VerticalAlignment="Center"/>
+                                                                                        <TextBlock Grid.Column="2" Text="{Binding LogProbText}" FontSize="10" FontFamily="Consolas, Monospace" Foreground="#B2742E" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                                                                        <TextBlock Grid.Column="3" Text="{Binding ConfidenceText}" FontSize="10" FontWeight="Bold" Foreground="#209988" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                                                                    </Grid>
+                                                                                </DataTemplate>
+                                                                            </ItemsControl.ItemTemplate>
+                                                                        </ItemsControl>
+                                                                    </ScrollViewer>
+                                                                </Border>
+                                                            </StackPanel>
                                                         </StackPanel>
-
-                                                        <Separator Height="1" Background="#E6847C"/>
-
-                                                        <!-- Alternative Pronunciation Candidates -->
-                                                        <StackPanel Spacing="6">
-                                                            <TextBlock Text="Pronunciation Variants (Click to select):" FontSize="11" FontWeight="Bold" Foreground="#804D1C"/>
-                                                            <ItemsControl ItemsSource="{Binding Alternatives}">
-                                                                <ItemsControl.ItemTemplate>
-                                                                    <DataTemplate x:DataType="local:CandidateModel">
-                                                                        <Button HorizontalAlignment="Stretch" Margin="0,2" Padding="10,6" 
-                                                                                Background="{Binding ButtonBackground}" 
-                                                                                BorderBrush="#E6847C" BorderThickness="1" CornerRadius="6"
-                                                                                Click="OnCandidateSelected" Tag="{Binding}">
-                                                                            <Grid ColumnDefinitions="110, *, Auto">
-                                                                                <TextBlock Grid.Column="0" Text="{Binding VariantLabel}" FontSize="11" FontWeight="Bold" Foreground="#B2742E" VerticalAlignment="Center"/>
-                                                                                <TextBlock Grid.Column="1" Text="{Binding DisplayPhonemes}" FontFamily="Consolas, Monospace" FontWeight="Bold" Foreground="#804D1C" VerticalAlignment="Center"/>
-                                                                                <TextBlock Grid.Column="2" Text="{Binding ConfidenceText}" FontSize="11" Foreground="#209988" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                                                                            </Grid>
-                                                                        </Button>
-                                                                    </DataTemplate>
-                                                                </ItemsControl.ItemTemplate>
-                                                            </ItemsControl>
-                                                        </StackPanel>
-
-                                                        <Separator Height="1" Background="#E6847C"/>
-
-                                                        <!-- Token Log-Probability Breakdown Table -->
-                                                        <StackPanel Spacing="6">
-                                                            <TextBlock Text="Per-Phoneme Log-Probabilities:" FontSize="11" FontWeight="Bold" Foreground="#804D1C"/>
-                                                            <ItemsControl ItemsSource="{Binding LogProbs}">
-                                                                <ItemsControl.ItemTemplate>
-                                                                    <DataTemplate x:DataType="local:TokenLogProbModel">
-                                                                        <Grid ColumnDefinitions="50, *, 60, 70" Margin="0,2">
-                                                                            <TextBlock Grid.Column="0" Text="{Binding Phoneme}" FontFamily="Consolas, Monospace" FontWeight="Bold" Foreground="{Binding TextColor}"/>
-                                                                            <TextBlock Grid.Column="1" Text="{Binding CategoryName}" FontSize="10" Foreground="#804D1C" VerticalAlignment="Center"/>
-                                                                            <TextBlock Grid.Column="2" Text="{Binding LogProbText}" FontSize="10" FontFamily="Consolas, Monospace" Foreground="#B2742E" HorizontalAlignment="Right" VerticalAlignment="Center"/>
-                                                                            <TextBlock Grid.Column="3" Text="{Binding ConfidenceText}" FontSize="10" FontWeight="Bold" Foreground="#209988" HorizontalAlignment="Right" VerticalAlignment="Center"/>
-                                                                        </Grid>
-                                                                    </DataTemplate>
-                                                                </ItemsControl.ItemTemplate>
-                                                            </ItemsControl>
-                                                        </StackPanel>
-                                                    </StackPanel>
+                                                    </ScrollViewer>
                                                 </Border>
                                             </Flyout>
                                         </FlyoutBase.AttachedFlyout>
@@ -206,38 +255,41 @@
                                         </ToolTip.Tip>
 
                                         <StackPanel Spacing="4">
-                                            <!-- Note / Word Header + Model Tag -->
+                                            <!-- Card Header -->
                                             <Grid ColumnDefinitions="*, Auto">
                                                 <TextBlock Grid.Column="0" 
-                                                           Text="{Binding Word}" 
-                                                           Foreground="#B2742E" 
-                                                           FontSize="11" 
-                                                           FontWeight="Bold" 
-                                                           HorizontalAlignment="Left"/>
+                                                        Text="{Binding Word}" 
+                                                        Foreground="#B2742E" 
+                                                        FontSize="11" 
+                                                        FontWeight="Bold" 
+                                                        HorizontalAlignment="Left"
+                                                        TextWrapping="Wrap"/>
                                                 <TextBlock Grid.Column="1" 
-                                                           Text="{Binding ModelTag}" 
-                                                           Foreground="#804D1C" 
-                                                           FontSize="9" 
-                                                           FontWeight="SemiBold" 
-                                                           Margin="6,0,0,0"
-                                                           HorizontalAlignment="Right"/>
+                                                        Text="{Binding ModelTag}" 
+                                                        Foreground="#804D1C" 
+                                                        FontSize="9" 
+                                                        FontWeight="SemiBold" 
+                                                        Margin="6,0,0,0"
+                                                        HorizontalAlignment="Right"
+                                                        VerticalAlignment="Top"/>
                                             </Grid>
                                             
-                                            <!-- Phonemes Sequence with '|' Separator -->
+                                            <!-- Wrapped Phonemes Sequence -->
                                             <ItemsControl ItemsSource="{Binding Phonemes}">
                                                 <ItemsControl.ItemsPanel>
                                                     <ItemsPanelTemplate>
-                                                        <StackPanel Orientation="Horizontal" Spacing="4"/>
+                                                        <WrapPanel Orientation="Horizontal"/>
                                                     </ItemsPanelTemplate>
                                                 </ItemsControl.ItemsPanel>
                                                 <ItemsControl.ItemTemplate>
                                                     <DataTemplate x:DataType="local:PhonemeTextModel">
                                                         <TextBlock Text="{Binding Phoneme}" 
-                                                                   Foreground="{Binding Foreground}" 
-                                                                   FontWeight="Bold" 
-                                                                   FontSize="20" 
-                                                                   FontFamily="Consolas, Monospace"
-                                                                   VerticalAlignment="Center">
+                                                                Foreground="{Binding Foreground}" 
+                                                                FontWeight="Bold" 
+                                                                FontSize="20" 
+                                                                FontFamily="Consolas, Monospace"
+                                                                VerticalAlignment="Center"
+                                                                Margin="0,0,4,2">
                                                             <ToolTip.Tip>
                                                                 <TextBlock Text="{Binding TypeName}"/>
                                                             </ToolTip.Tip>
