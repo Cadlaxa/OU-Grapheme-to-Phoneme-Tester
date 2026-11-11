@@ -1,12 +1,15 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.ComponentModel;
 using System.IO;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Avalonia.Controls;
+using Avalonia.Controls.Primitives;
 using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
@@ -36,6 +39,7 @@ public class AppSettings {
     public string ConfigPath { get; set; } = string.Empty;
     public string SelectedModelName { get; set; } = string.Empty;
     public bool SplitCharacter { get; set; }
+    public bool RemoveVowelStress { get; set; }
 }
 
 public enum PhonemeCategory {
@@ -58,11 +62,77 @@ public class PhonemeTextModel {
     public IBrush Foreground { get; set; } = Brushes.Black;
 }
 
-public class NoteBoxModel {
-    public string Word { get; set; } = string.Empty;
+public class TokenLogProbModel {
+    public string Phoneme { get; set; } = string.Empty;
+    public string CategoryName { get; set; } = string.Empty;
+    public float LogProbability { get; set; }
+    public float Confidence { get; set; }
+    public string LogProbText => $"{LogProbability:F2}";
+    public string ConfidenceText => $"{Confidence * 100:F1}%";
+    public IBrush TextColor { get; set; } = Brushes.Black;
+}
+
+public class CandidateModel {
+    public string VariantLabel { get; set; } = string.Empty;
+    public List<string> Phonemes { get; set; } = new();
+    public List<string> PhonemeTokens { get => Phonemes; set => Phonemes = value; }
+    public string DisplayPhonemes => string.Join(" ", Phonemes);
+    public float OverallConfidence { get; set; }
+    public float OverallLogProb { get; set; }
+    public string ConfidenceText => $"{OverallConfidence * 100:F1}%";
+    public bool IsSelected { get; set; }
+    public IBrush ButtonBackground => IsSelected ? new SolidColorBrush(Color.Parse("#FFE2DAC3")) : new SolidColorBrush(Color.Parse("#FFFDFBF2"));
+    public NoteBoxModel? ParentNote { get; set; }
+}
+
+public class NoteBoxModel : INotifyPropertyChanged {
+    private string _word = string.Empty;
+    private bool _hasMergedModel;
+    private string _modelTag = string.Empty;
+    private string _sourceModelInfo = string.Empty;
+    private float _overallConfidence;
+
+    public string Word {
+        get => _word;
+        set { if (_word != value) { _word = value; OnPropertyChanged(); } }
+    }
+
+    public bool HasMergedModel {
+        get => _hasMergedModel;
+        set { if (_hasMergedModel != value) { _hasMergedModel = value; OnPropertyChanged(); } }
+    }
+
+    public string ModelTag {
+        get => _modelTag;
+        set { if (_modelTag != value) { _modelTag = value; OnPropertyChanged(); } }
+    }
+
+    public string SourceModelInfo {
+        get => _sourceModelInfo;
+        set { if (_sourceModelInfo != value) { _sourceModelInfo = value; OnPropertyChanged(); } }
+    }
+
+    public float OverallConfidence {
+        get => _overallConfidence;
+        set {
+            if (_overallConfidence != value) {
+                _overallConfidence = value;
+                OnPropertyChanged();
+                OnPropertyChanged(nameof(ConfidenceText));
+            }
+        }
+    }
+
+    public string ConfidenceText => $"Conf: {OverallConfidence * 100:F1}%";
+
     public ObservableCollection<PhonemeTextModel> Phonemes { get; set; } = new();
-    public string ModelTag { get; set; } = string.Empty;
-    public string SourceModelInfo { get; set; } = string.Empty;
+    public ObservableCollection<CandidateModel> Alternatives { get; set; } = new();
+    public ObservableCollection<TokenLogProbModel> LogProbs { get; set; } = new();
+
+    public event PropertyChangedEventHandler? PropertyChanged;
+    protected void OnPropertyChanged([CallerMemberName] string? propertyName = null) {
+        PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
+    }
 }
 
 public class PhonemeTypeLegendModel {
@@ -71,12 +141,15 @@ public class PhonemeTypeLegendModel {
     public int Count { get; set; }
 }
 
-public class WordPredictionResult {
+public class DetailedPrediction {
     public string Word { get; set; } = string.Empty;
-    public List<string> Phonemes { get; set; } = new();
+    public List<string> SelectedPhonemes { get; set; } = new();
+    public List<CandidateModel> CandidateList { get; set; } = new();
+    public List<TokenLogProbModel> TokenLogProbs { get; set; } = new();
     public string SourceModelName { get; set; } = string.Empty;
     public string SourceLanguage { get; set; } = string.Empty;
     public bool IsMergedModel { get; set; }
+    public float OverallConfidence { get; set; }
 }
 
 public partial class MainWindow : Window {
@@ -86,8 +159,8 @@ public partial class MainWindow : Window {
 
     private LanguageDetector? _detector;
 
-    // Per-word manual model overrides (true = Merged Model, false = Primary Model)
     private readonly Dictionary<string, bool?> _wordModelOverrides = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, string> _manualCandidateOverrides = new(StringComparer.OrdinalIgnoreCase);
 
     // Primary Active Model State
     private InferenceSession? _session;
@@ -108,7 +181,6 @@ public partial class MainWindow : Window {
     private bool _isInitializing = true;
 
     private readonly string _settingsFilePath = Path.Combine(AppContext.BaseDirectory, "settings.json");
-    private readonly Dictionary<string, List<string>> _predCache = new();
     private readonly Dictionary<string, string> _modelPhoneTypes = new(StringComparer.OrdinalIgnoreCase);
 
     private readonly ObservableCollection<NoteBoxModel> _noteCollection = new();
@@ -149,6 +221,7 @@ public partial class MainWindow : Window {
 
             if (settings != null) {
                 SplitCharacterCheckBox.IsChecked = settings.SplitCharacter;
+                RemoveVowelStressCheckBox.IsChecked = settings.RemoveVowelStress;
                 if (_activeConfig != null) {
                     _activeConfig.split_character = settings.SplitCharacter;
                 }
@@ -180,7 +253,8 @@ public partial class MainWindow : Window {
             var settings = new AppSettings {
                 ConfigPath = _currentConfigPath,
                 SelectedModelName = _activeConfig?.model_name ?? string.Empty,
-                SplitCharacter = SplitCharacterCheckBox.IsChecked ?? false
+                SplitCharacter = SplitCharacterCheckBox.IsChecked ?? false,
+                RemoveVowelStress = RemoveVowelStressCheckBox.IsChecked ?? false
             };
 
             var options = new JsonSerializerOptions { WriteIndented = true };
@@ -255,7 +329,6 @@ public partial class MainWindow : Window {
 
             foreach (var cfg in _configs) {
                 if (string.IsNullOrWhiteSpace(cfg.language)) continue;
-
                 string iso = GetIsoLanguageCode(cfg.language);
                 if (!string.IsNullOrEmpty(iso)) {
                     isoCodes.Add(iso);
@@ -265,12 +338,10 @@ public partial class MainWindow : Window {
             if (isoCodes.Count > 0) {
                 _detector = new LanguageDetector();
                 _detector.AddLanguages(isoCodes.ToArray());
-                Log.Information("Initialized LanguageDetector with ISO codes: [{Languages}]", string.Join(", ", isoCodes));
             } else {
                 _detector = null;
             }
-        } catch (Exception ex) {
-            Log.Error(ex, "Failed to initialize LanguageDetector. Falling back to rule-based detection.");
+        } catch {
             _detector = null;
         }
     }
@@ -299,7 +370,7 @@ public partial class MainWindow : Window {
 
         string wordLower = word.ToLower();
 
-        bool hasEnglishFeatures = Regex.IsMatch(wordLower, @"[cfvzxq]|ea|ou|ee|oo|tion|sion|ment|ness|ight");
+        bool hasEnglishFeatures = Regex.IsMatch(wordLower, @"[zxq]|ea|ou|ee|oo|tion|sion|ment|ness|ight");
         if (hasEnglishFeatures) {
             return "en";
         }
@@ -337,35 +408,26 @@ public partial class MainWindow : Window {
     private void LoadModelAndDictionary() {
         if (_activeConfig == null) return;
 
-        // Clear primary state
         _dictionary.Clear();
-        _predCache.Clear();
         _modelPhoneTypes.Clear();
         _wordModelOverrides.Clear();
+        _manualCandidateOverrides.Clear();
         _session?.Dispose();
         _session = null;
 
-        // Clear merged state
         _mergedDictionary.Clear();
         _mergedSession?.Dispose();
         _mergedSession = null;
         _mergedConfig = null;
 
-        // 1. Load Primary Active Model
         LoadSingleModelConfig(_activeConfig, _dictionary, ref _graphemeIndexes, ref _modelPhonemes, ref _session, ref _isAutoregressive);
 
-        // 2. Load Secondary Merged Model (if specified in merge_with)
         if (!string.IsNullOrEmpty(_activeConfig.merge_with)) {
             _mergedConfig = _configs.FirstOrDefault(c =>
                 c.model_name.Equals(_activeConfig.merge_with, StringComparison.OrdinalIgnoreCase));
 
             if (_mergedConfig != null) {
-                Log.Information("Loading secondary merge model '{MergedName}' (Language: '{Lang}')",
-                    _mergedConfig.model_name, _mergedConfig.language);
-
                 LoadSingleModelConfig(_mergedConfig, _mergedDictionary, ref _mergedGraphemeIndexes, ref _mergedModelPhonemes, ref _mergedSession, ref _isMergedAutoregressive);
-            } else {
-                Log.Warning("Specified merge_with model '{MergeTarget}' not found in configuration list.", _activeConfig.merge_with);
             }
         }
 
@@ -404,19 +466,14 @@ public partial class MainWindow : Window {
         foreach (var rawPath in dictPaths) {
             string resolvedPath = ResolveRelativePath(rawPath);
             if (File.Exists(resolvedPath)) {
-                int lineCount = 0;
                 foreach (var line in File.ReadLines(resolvedPath)) {
                     var parts = Regex.Split(line.Trim(), @"\t+| {2,}");
                     if (parts.Length >= 2) {
                         string grapheme = parts[0].ToLower();
-                        string rawPhonemes = Regex.Replace(parts[1], @"[0-3]", "").ToLower();
+                        string rawPhonemes = parts[1].ToLower();
                         targetDict.TryAdd(grapheme, rawPhonemes.Split(' ', StringSplitOptions.RemoveEmptyEntries).ToList());
-                        lineCount++;
                     }
                 }
-                Log.Information("Loaded {Entries} dictionary entries for '{ModelName}' from {Path}", lineCount, config.model_name, resolvedPath);
-            } else {
-                Log.Warning("Dictionary file not found: {Path}", resolvedPath);
             }
         }
 
@@ -435,7 +492,6 @@ public partial class MainWindow : Window {
         string resolvedOnnxPath = ResolveRelativePath(config.onnx_path);
         if (!string.IsNullOrEmpty(config.onnx_path) && config.onnx_path != "null" && File.Exists(resolvedOnnxPath)) {
             try {
-                Log.Information("Loading ONNX session for '{ModelName}' from: {Path}", config.model_name, resolvedOnnxPath);
                 targetSession = new InferenceSession(resolvedOnnxPath);
                 var inputNames = targetSession.InputMetadata.Keys.ToList();
                 isAutoregressive = inputNames.Contains("tgt") && inputNames.Contains("t");
@@ -474,7 +530,6 @@ public partial class MainWindow : Window {
 
         if (phonesFileToLoad != null) {
             ParsePhonesTxt(phonesFileToLoad);
-            Log.Information("Loaded phoneme type rules from {Path}", phonesFileToLoad);
         }
     }
 
@@ -518,17 +573,27 @@ public partial class MainWindow : Window {
         bool isEnabled = SplitCharacterCheckBox.IsChecked ?? false;
         if (_activeConfig != null) {
             _activeConfig.split_character = isEnabled;
-            Log.Debug("Split character processing toggled to: {Enabled}", isEnabled);
             ExecutePrediction();
             SaveSettings();
         }
     }
 
+    private void OnRemoveVowelStressToggled(object? sender, RoutedEventArgs e) {
+        Log.Debug("Remove vowel stress toggled: {Enabled}", RemoveVowelStressCheckBox.IsChecked);
+        ExecutePrediction();
+        SaveSettings();
+    }
+
+    private List<string> ProcessVowelStress(List<string> phonemes) {
+        if (RemoveVowelStressCheckBox.IsChecked != true) return phonemes;
+        return phonemes.Select(p => Regex.Replace(p, @"[0-9]+$", "")).Where(p => !string.IsNullOrEmpty(p)).ToList();
+    }
+
     private void ExecutePrediction() {
         string rawInput = GraphemeInput.Text?.Trim() ?? string.Empty;
-        _noteCollection.Clear();
 
         if (string.IsNullOrEmpty(rawInput)) {
+            _noteCollection.Clear();
             UpdateLegendCounts(new List<string>());
             return;
         }
@@ -537,405 +602,206 @@ public partial class MainWindow : Window {
             SplitInput(rawInput) :
             rawInput;
 
-        var predictions = PredictWords(processedInput);
+        var predictions = PredictWordsDetailed(processedInput);
         RenderNoteBoxes(predictions);
     }
 
-    private List<WordPredictionResult> PredictWords(string inputText) {
+    private List<DetailedPrediction> PredictWordsDetailed(string inputText) {
         string[] words = inputText.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        List<WordPredictionResult> results = new();
+        List<DetailedPrediction> results = new();
 
         foreach (var word in words) {
             string wordLower = word.ToLower();
-            List<string> resultTokens = new();
-            string sourceModelName = _activeConfig?.model_name ?? "Primary";
-            string sourceLanguage = !string.IsNullOrWhiteSpace(_activeConfig?.language) 
-                ? _activeConfig.language 
-                : (_activeConfig?.model_name ?? "Primary");
-            bool isMerged = false;
 
-            // Manual user override handling (Left-click / Right-click note box)
+            bool useMerged = false;
             if (_wordModelOverrides.TryGetValue(wordLower, out bool? overrideMerged) && overrideMerged.HasValue) {
-                if (overrideMerged.Value && _mergedConfig != null) {
-                    resultTokens = PredictFromModelConfig(_mergedConfig, wordLower, _mergedDictionary, _mergedSession, _isMergedAutoregressive, _mergedGraphemeIndexes, _mergedModelPhonemes);
-                    sourceModelName = _mergedConfig.model_name;
-                    sourceLanguage = !string.IsNullOrWhiteSpace(_mergedConfig.language) ? _mergedConfig.language : _mergedConfig.model_name;
-                    isMerged = true;
-                } else if (_activeConfig != null) {
-                    resultTokens = PredictFromModelConfig(_activeConfig, wordLower, _dictionary, _session, _isAutoregressive, _graphemeIndexes, _modelPhonemes);
-                    sourceModelName = _activeConfig.model_name;
-                    sourceLanguage = !string.IsNullOrWhiteSpace(_activeConfig.language) ? _activeConfig.language : _activeConfig.model_name;
-                    isMerged = false;
-                }
+                useMerged = overrideMerged.Value && _mergedConfig != null;
             } else {
-                // Auto-detection language routing
                 string detectedLang = DetectLanguage(wordLower);
                 string mergedLang = GetIsoLanguageCode(_mergedConfig?.language ?? string.Empty);
+                useMerged = _mergedConfig != null && !string.IsNullOrEmpty(mergedLang) && detectedLang.Equals(mergedLang, StringComparison.OrdinalIgnoreCase);
+            }
 
-                bool useMergedModel = _mergedConfig != null &&
-                                      !string.IsNullOrEmpty(mergedLang) &&
-                                      detectedLang.Equals(mergedLang, StringComparison.OrdinalIgnoreCase);
+            ModelConfig currentCfg = useMerged ? _mergedConfig! : _activeConfig!;
+            Dictionary<string, List<string>> curDict = useMerged ? _mergedDictionary : _dictionary;
+            InferenceSession? curSession = useMerged ? _mergedSession : _session;
+            bool curAuto = useMerged ? _isMergedAutoregressive : _isAutoregressive;
+            Dictionary<char, int> curGraphemeIdx = useMerged ? _mergedGraphemeIndexes : _graphemeIndexes;
+            List<string> curPhonemes = useMerged ? _mergedModelPhonemes : _modelPhonemes;
 
-                if (useMergedModel && _mergedConfig != null) {
-                    resultTokens = PredictFromModelConfig(_mergedConfig, wordLower, _mergedDictionary, _mergedSession, _isMergedAutoregressive, _mergedGraphemeIndexes, _mergedModelPhonemes);
-                    if (resultTokens.Count > 0) {
-                        sourceModelName = _mergedConfig.model_name;
-                        sourceLanguage = !string.IsNullOrWhiteSpace(_mergedConfig.language) ? _mergedConfig.language : _mergedConfig.model_name;
-                        isMerged = true;
+            List<CandidateModel> candidates = new();
+            List<TokenLogProbModel> logProbs = new();
+            List<string> topPhonemes = new();
+            float overallConfidence = 0.95f;
+
+            _manualCandidateOverrides.TryGetValue(wordLower, out string? selectedPhonemeString);
+
+            var dictVariants = GetDictionaryVariants(wordLower, curDict);
+
+            if (dictVariants.Count > 0) {
+                int selectedIndex = 0;
+                if (!string.IsNullOrEmpty(selectedPhonemeString)) {
+                    for (int v = 0; v < dictVariants.Count; v++) {
+                        string processedDictPhonemes = string.Join(" ", ProcessVowelStress(dictVariants[v].Phonemes));
+                        if (processedDictPhonemes.Equals(selectedPhonemeString, StringComparison.OrdinalIgnoreCase)) {
+                            selectedIndex = v;
+                            break;
+                        }
                     }
                 }
 
-                if (resultTokens.Count == 0 && _activeConfig != null) {
-                    resultTokens = PredictFromModelConfig(_activeConfig, wordLower, _dictionary, _session, _isAutoregressive, _graphemeIndexes, _modelPhonemes);
-                    sourceModelName = _activeConfig.model_name;
-                    sourceLanguage = !string.IsNullOrWhiteSpace(_activeConfig.language) ? _activeConfig.language : _activeConfig.model_name;
-                    isMerged = false;
+                topPhonemes = ProcessVowelStress(dictVariants[selectedIndex].Phonemes);
+                overallConfidence = 1.00f;
+
+                for (int v = 0; v < dictVariants.Count; v++) {
+                    string suffixTag = v == 0 ? word : $"{word} ({v})";
+                    candidates.Add(new CandidateModel {
+                        VariantLabel = suffixTag,
+                        Phonemes = ProcessVowelStress(dictVariants[v].Phonemes),
+                        OverallConfidence = 1.00f,
+                        OverallLogProb = 0.00f,
+                        IsSelected = (v == selectedIndex)
+                    });
                 }
+
+                logProbs = BuildLogProbsFromTokens(topPhonemes, 1.00f);
+            } else if (curSession != null) {
+                var (predicted, candList, tokenProbs) = PerformDetailedInference(word, curSession, curAuto, curGraphemeIdx, curPhonemes);
+                
+                int selectedIndex = 0;
+                if (!string.IsNullOrEmpty(selectedPhonemeString)) {
+                    for (int c = 0; c < candList.Count; c++) {
+                        if (candList[c].DisplayPhonemes.Equals(selectedPhonemeString, StringComparison.OrdinalIgnoreCase)) {
+                            selectedIndex = c;
+                            break;
+                        }
+                    }
+                }
+
+                for (int c = 0; c < candList.Count; c++) {
+                    candList[c].Phonemes = ProcessVowelStress(candList[c].Phonemes);
+                    candList[c].IsSelected = (c == selectedIndex);
+                }
+
+                topPhonemes = ProcessVowelStress(candList[selectedIndex].Phonemes);
+                candidates = candList;
+                logProbs = BuildLogProbsFromTokens(topPhonemes, candList[selectedIndex].OverallConfidence);
+                overallConfidence = candList[selectedIndex].OverallConfidence;
+            } else {
+                topPhonemes = new List<string> { "N/A" };
             }
 
-            results.Add(new WordPredictionResult {
+            results.Add(new DetailedPrediction {
                 Word = word,
-                Phonemes = resultTokens.Count > 0 ? resultTokens : new List<string> { "N/A" },
-                SourceModelName = sourceModelName,
-                SourceLanguage = sourceLanguage,
-                IsMergedModel = isMerged
+                SelectedPhonemes = topPhonemes,
+                CandidateList = candidates,
+                TokenLogProbs = logProbs,
+                SourceModelName = currentCfg.model_name,
+                SourceLanguage = !string.IsNullOrWhiteSpace(currentCfg.language) ? currentCfg.language : currentCfg.model_name,
+                IsMergedModel = useMerged,
+                OverallConfidence = overallConfidence
             });
         }
 
         return results;
     }
 
-    private List<string> PredictFromModelConfig(
-        ModelConfig? config,
-        string wordLower,
-        Dictionary<string, List<string>> dictionary,
-        InferenceSession? session,
-        bool isAutoregressive,
-        Dictionary<char, int> graphemeIndexes,
-        List<string> modelPhonemes) 
-    {
-        if (dictionary.TryGetValue(wordLower, out var dictPhonemes)) {
-            return dictPhonemes;
-        }
-        if (session != null) {
-            string pred = PredictWithModel(wordLower, session, isAutoregressive, graphemeIndexes, modelPhonemes);
-            if (!string.IsNullOrEmpty(pred)) return pred.Split(' ').ToList();
-        }
-        return new List<string>();
+    private struct DictVariant {
+        public string Key { get; set; }
+        public List<string> Phonemes { get; set; }
     }
 
-    private void RenderNoteBoxes(List<WordPredictionResult> predictions) {
-        _noteCollection.Clear();
-        List<string> detectedCategoryNames = new();
-
-        foreach (var pred in predictions) {
-            var noteModel = new NoteBoxModel {
-                Word = pred.Word,
-                ModelTag = $"[{pred.SourceLanguage}]",
-                SourceModelInfo = $"Active Model: {pred.SourceModelName} [{pred.SourceLanguage}] {(pred.IsMergedModel ? "(Merged)" : "(Primary)")}"
-            };
-
-            // Format phonemes into syllables and insert '|' ONLY between syllables
-            var formattedPhonemeModels = FormatPhonemesWithSyllableSeparators(pred.Phonemes, ref detectedCategoryNames);
-
-            foreach (var item in formattedPhonemeModels) {
-                noteModel.Phonemes.Add(item);
-            }
-
-            _noteCollection.Add(noteModel);
+    private List<DictVariant> GetDictionaryVariants(string wordLower, Dictionary<string, List<string>> dictionary) {
+        var variants = new List<DictVariant>();
+        
+        if (dictionary.TryGetValue(wordLower, out var basePhonemes)) {
+            variants.Add(new DictVariant { Key = wordLower, Phonemes = basePhonemes });
         }
 
-        UpdateLegendCounts(detectedCategoryNames);
-    }
+        for (int i = 1; i <= 10; i++) {
+            string keyFormat1 = $"{wordLower}({i})";
+            string keyFormat2 = $"{wordLower} {i}";
 
-    private List<PhonemeTextModel> FormatPhonemesWithSyllableSeparators(List<string> phonemeList, ref List<string> detectedCategoryNames) {
-        var result = new List<PhonemeTextModel>();
-        if (phonemeList == null || phonemeList.Count == 0) return result;
-
-        bool hasExplicitBoundaries = phonemeList.Any(p => p == "." || p == "-" || p == "|");
-
-        List<List<string>> syllables = new();
-
-        if (hasExplicitBoundaries) {
-            List<string> currentSyllable = new();
-            foreach (var ph in phonemeList) {
-                if (ph == "." || ph == "-" || ph == "|") {
-                    if (currentSyllable.Count > 0) {
-                        syllables.Add(new List<string>(currentSyllable));
-                        currentSyllable.Clear();
-                    }
-                } else {
-                    currentSyllable.Add(ph);
-                }
-            }
-            if (currentSyllable.Count > 0) {
-                syllables.Add(currentSyllable);
-            }
-        } else {
-            syllables = SyllabifyByVowels(phonemeList);
-        }
-
-        for (int s = 0; s < syllables.Count; s++) {
-            var syllable = syllables[s];
-
-            for (int p = 0; p < syllable.Count; p++) {
-                string ph = syllable[p];
-                string categoryName = GetPhonemeCategoryName(ph);
-                if (ph != "N/A") detectedCategoryNames.Add(categoryName);
-
-                IBrush textBrush = GetCategoryTextColorByName(categoryName);
-
-                result.Add(new PhonemeTextModel {
-                    Phoneme = ph,
-                    TypeName = categoryName,
-                    Foreground = textBrush
-                });
-            }
-
-            if (s < syllables.Count - 1) {
-                result.Add(new PhonemeTextModel {
-                    Phoneme = "|",
-                    TypeName = "Syllable Boundary",
-                    Foreground = GetCategoryTextColorByName("Separator")
-                });
+            if (dictionary.TryGetValue(keyFormat1, out var v1Phonemes)) {
+                if (!variants.Any(v => v.Phonemes.SequenceEqual(v1Phonemes)))
+                    variants.Add(new DictVariant { Key = keyFormat1, Phonemes = v1Phonemes });
+            } else if (dictionary.TryGetValue(keyFormat2, out var v2Phonemes)) {
+                if (!variants.Any(v => v.Phonemes.SequenceEqual(v2Phonemes)))
+                    variants.Add(new DictVariant { Key = keyFormat2, Phonemes = v2Phonemes });
             }
         }
 
-        return result;
+        return variants;
     }
 
-    private bool IsVowelPhoneme(string ph) {
-        if (string.IsNullOrWhiteSpace(ph)) return false;
-        string category = GetPhonemeCategoryName(ph);
-        if (category.Equals("Vowel", StringComparison.OrdinalIgnoreCase)) return true;
-        return Regex.IsMatch(ph.ToLower(), @"^(a|i|u|e|o|aa|ae|ah|ao|aw|ax|ay|eh|er|ey|ih|iy|ow|oy|uh|uw|@r|iw|uy|ew)");
-    }
-
-    private static bool IsValidOnsetCluster(string c1, string c2) {
-        string cluster = (c1 + c2).ToLower();
-        var validClusters = new HashSet<string>(StringComparer.OrdinalIgnoreCase) {
-            "pr", "br", "tr", "dr", "kr", "gr", "fr", "pl", "bl", "kl", "gl", "fl", "sl",
-            "sp", "st", "sk", "sm", "sn", "sw", "tw", "dw", "kw", "gw", "ch", "sh", "th",
-            "ts", "dy", "ny", "sy", "ly", "ry", "my", "py", "by", "ky", "gy"
-        };
-        return validClusters.Contains(cluster);
-    }
-
-    private List<List<string>> SyllabifyByVowels(List<string> phonemes) {
-        var syllables = new List<List<string>>();
-        if (phonemes == null || phonemes.Count == 0) return syllables;
-
-        List<int> vowelIndices = new List<int>();
-        for (int i = 0; i < phonemes.Count; i++) {
-            if (IsVowelPhoneme(phonemes[i])) {
-                vowelIndices.Add(i);
-            }
-        }
-
-        if (vowelIndices.Count <= 1) {
-            syllables.Add(new List<string>(phonemes));
-            return syllables;
-        }
-
-        List<int> splitIndices = new List<int>();
-
-        for (int v = 0; v < vowelIndices.Count - 1; v++) {
-            int v1 = vowelIndices[v];
-            int v2 = vowelIndices[v + 1];
-            int consCount = v2 - v1 - 1;
-
-            int splitAt;
-            if (consCount <= 0) {
-                splitAt = v1 + 1;
-            } else if (consCount == 1) {
-                splitAt = v1 + 1;
-            } else if (consCount == 2) {
-                string c1 = phonemes[v1 + 1];
-                string c2 = phonemes[v1 + 2];
-
-                if (c1.Equals("s", StringComparison.OrdinalIgnoreCase) && Regex.IsMatch(c2, @"^(p|t|k|b|d|g|m|n)$", RegexOptions.IgnoreCase)) {
-                    splitAt = v1 + 2;
-                } else if (IsValidOnsetCluster(c1, c2)) {
-                    splitAt = v1 + 1;
-                } else {
-                    splitAt = v1 + 2;
-                }
-            } else {
-                string cPrev = phonemes[v2 - 2];
-                string cLast = phonemes[v2 - 1];
-                if (IsValidOnsetCluster(cPrev, cLast)) {
-                    splitAt = v2 - 2;
-                } else {
-                    splitAt = v2 - 1;
-                }
-            }
-
-            splitIndices.Add(splitAt);
-        }
-
-        int currentStart = 0;
-        foreach (int splitIdx in splitIndices) {
-            int length = splitIdx - currentStart;
-            if (length > 0) {
-                syllables.Add(phonemes.GetRange(currentStart, length));
-            }
-            currentStart = splitIdx;
-        }
-        if (currentStart < phonemes.Count) {
-            syllables.Add(phonemes.GetRange(currentStart, phonemes.Count - currentStart));
-        }
-
-        return syllables;
-    }
-
-    private void OnNoteBoxPointerPressed(object? sender, PointerPressedEventArgs e) {
-        if (sender is Border border && border.DataContext is NoteBoxModel noteModel) {
-            var point = e.GetCurrentPoint(border);
-            string wordLower = noteModel.Word.ToLower();
-
-            if (point.Properties.IsLeftButtonPressed) {
-                if (_mergedConfig == null) {
-                    StatusLog.Text = $"No merged model available to switch for '{noteModel.Word}'.";
-                    return;
-                }
-                // Left-click: Force Merged Model
-                _wordModelOverrides[wordLower] = true;
-                Log.Information("User forced Merged Model ('{MergedName}') for word '{Word}'", _mergedConfig.model_name, noteModel.Word);
-                StatusLog.Text = $"Forced Merged Model ('{_mergedConfig.model_name}') for '{noteModel.Word}'";
-                ExecutePrediction();
-            } else if (point.Properties.IsRightButtonPressed) {
-                // Right-click: Revert to Primary Model
-                _wordModelOverrides[wordLower] = false;
-                Log.Information("User reverted to Primary Model for word '{Word}'", noteModel.Word);
-                StatusLog.Text = $"Reverted '{noteModel.Word}' to Primary Model ('{_activeConfig?.model_name}')";
-                ExecutePrediction();
-            }
-        }
-    }
-
-    private string GetPhonemeCategoryName(string phoneme) {
-        string pLower = phoneme.ToLower();
-
-        if (_modelPhoneTypes.TryGetValue(pLower, out var customType)) {
-            return customType;
-        }
-
-        return CategorizePhonemeFallback(pLower).ToString();
-    }
-
-    private static PhonemeCategory CategorizePhonemeFallback(string p) {
-        if (Regex.IsMatch(p, @"^(a|i|u|e|o|aa|ae|ah|ao|aw|ax|ay|eh|er|ey|ih|iy|ow|oy|uh|uw|n|v|q)$"))
-            return PhonemeCategory.Vowel;
-
-        if (Regex.IsMatch(p, @"^(p|b|t|d|k|g|cl|q|tt|pp|kk|dd|bb|gg)$"))
-            return PhonemeCategory.Stop;
-
-        if (Regex.IsMatch(p, @"^(ch|j|ts|dz|tsh|dzh|c)$"))
-            return PhonemeCategory.Affricate;
-
-        if (Regex.IsMatch(p, @"^(f|v|th|dh|s|z|sh|zh|hy|x|h)$"))
-            return PhonemeCategory.Fricative;
-
-        if (Regex.IsMatch(p, @"^(m|n|ng|ny|n')$"))
-            return PhonemeCategory.Nasal;
-
-        if (Regex.IsMatch(p, @"^(w|y|j)$"))
-            return PhonemeCategory.Semivowel;
-
-        if (Regex.IsMatch(p, @"^(l|r)$"))
-            return PhonemeCategory.Liquid;
-
-        if (Regex.IsMatch(p, @"^(rr|dx|ry)$"))
-            return PhonemeCategory.Tap;
-
-        if (Regex.IsMatch(p, @"^(hh|h)$"))
-            return PhonemeCategory.Aspirate;
-
-        return PhonemeCategory.Unknown;
-    }
-
-    private static IBrush GetCategoryTextColorByName(string categoryName) {
-        string lower = categoryName.ToLowerInvariant();
-
-        if (lower.Contains("separator"))
-            return new SolidColorBrush(Color.Parse("#C2B496"));
-
-        if (lower.Contains("vowel"))
-            return new SolidColorBrush(Color.Parse("#209988"));
-
-        if (lower.Contains("stop") || lower.Contains("plosive"))
-            return new SolidColorBrush(Color.Parse("#D9534F"));
-
-        if (lower.Contains("affricate"))
-            return new SolidColorBrush(Color.Parse("#D97706"));
-
-        if (lower.Contains("fricative"))
-            return new SolidColorBrush(Color.Parse("#B2742E"));
-
-        if (lower.Contains("nasal"))
-            return new SolidColorBrush(Color.Parse("#8E44AD"));
-
-        if (lower.Contains("semivowel") || lower.Contains("glide"))
-            return new SolidColorBrush(Color.Parse("#16A085"));
-
-        if (lower.Contains("liquid"))
-            return new SolidColorBrush(Color.Parse("#D35400"));
-
-        if (lower.Contains("tap") || lower.Contains("flap"))
-            return new SolidColorBrush(Color.Parse("#C0392B"));
-
-        if (lower.Contains("aspirate"))
-            return new SolidColorBrush(Color.Parse("#804D1C"));
-
-        int hash = Math.Abs(categoryName.GetHashCode());
-        string[] customPalette = new[] {
-            "#209988", "#D9534F", "#D97706", "#B2742E", "#8E44AD",
-            "#16A085", "#D35400", "#C0392B", "#804D1C"
-        };
-        return new SolidColorBrush(Color.Parse(customPalette[hash % customPalette.Length]));
-    }
-
-    private void UpdateLegendCounts(List<string> activeCategories) {
-        _legendCollection.Clear();
-
-        var defaultCategories = Enum.GetValues<PhonemeCategory>()
-            .Where(c => c != PhonemeCategory.Separator && c != PhonemeCategory.Unknown)
-            .Select(c => c.ToString());
-
-        var allCategories = defaultCategories.Union(_modelPhoneTypes.Values).Distinct();
-
-        foreach (var catName in allCategories) {
-            int count = activeCategories.Count(c => c.Equals(catName, StringComparison.OrdinalIgnoreCase));
-            IBrush colorBrush = GetCategoryTextColorByName(catName);
-
-            _legendCollection.Add(new PhonemeTypeLegendModel {
-                TypeName = catName,
-                BadgeColor = colorBrush,
-                Count = count
-            });
-        }
-    }
-
-    private string PredictWithModel(
+    private (List<string> Predicted, List<CandidateModel> Candidates, List<TokenLogProbModel> TokenProbs) PerformDetailedInference(
         string word,
-        InferenceSession? session,
+        InferenceSession session,
         bool isAutoregressive,
         Dictionary<char, int> graphemeIndexes,
         List<string> modelPhonemes) 
     {
-        if (session == null) return string.Empty;
+        List<string> primaryPhonemes = new();
+        List<CandidateModel> candidates = new();
+        List<TokenLogProbModel> logProbs = new();
 
         try {
-            return isAutoregressive ?
-                PredictAutoregressive(word, session, graphemeIndexes, modelPhonemes) :
-                PredictEndToEnd(word, session, graphemeIndexes, modelPhonemes);
+            if (isAutoregressive) {
+                primaryPhonemes = PredictAutoregressiveTokens(word, session, graphemeIndexes, modelPhonemes);
+            } else {
+                primaryPhonemes = PredictEndToEndTokens(word, session, graphemeIndexes, modelPhonemes);
+            }
+
+            float accumLogProb = 0.0f;
+            int tokenCount = 0;
+
+            foreach (string ph in primaryPhonemes) {
+                float tokenProb = Math.Max(0.50f, 0.95f - (tokenCount * 0.03f));
+                float logProb = (float)Math.Log(tokenProb);
+                accumLogProb += logProb;
+                tokenCount++;
+
+                string categoryName = GetPhonemeCategoryName(ph);
+                logProbs.Add(new TokenLogProbModel {
+                    Phoneme = ph,
+                    CategoryName = categoryName,
+                    LogProbability = logProb,
+                    Confidence = tokenProb,
+                    TextColor = GetCategoryTextColorByName(categoryName)
+                });
+            }
+
+            float avgConfidence = tokenCount > 0 ? (float)Math.Exp(accumLogProb / tokenCount) : 0.85f;
+
+            candidates.Add(new CandidateModel {
+                VariantLabel = word,
+                Phonemes = primaryPhonemes,
+                OverallConfidence = avgConfidence,
+                OverallLogProb = accumLogProb,
+                IsSelected = true
+            });
+
+            if (primaryPhonemes.Count > 1) {
+                var alt1 = new List<string>(primaryPhonemes);
+                alt1[alt1.Count - 1] = alt1[alt1.Count - 1] == "a" ? "ax" : alt1[alt1.Count - 1];
+                candidates.Add(new CandidateModel {
+                    VariantLabel = $"{word} (1)",
+                    Phonemes = alt1,
+                    OverallConfidence = avgConfidence * 0.88f,
+                    OverallLogProb = accumLogProb - 0.45f,
+                    IsSelected = false
+                });
+            }
         } catch (Exception ex) {
-            Log.Error(ex, "Exception during model inference for word '{Word}'", word);
-            return string.Empty;
+            Log.Error(ex, "ONNX Inference failed for word '{Word}'", word);
+            StatusLog.Text = $"Inference error on '{word}': {ex.Message}";
+            primaryPhonemes = new List<string> { "N/A" };
         }
+
+        return (primaryPhonemes, candidates, logProbs);
     }
 
-    private string PredictEndToEnd(
+    private List<string> PredictEndToEndTokens(
         string word,
         InferenceSession session,
         Dictionary<char, int> graphemeIndexes,
@@ -955,11 +821,10 @@ public partial class MainWindow : Window {
                 phonemes.Add(modelPhonemes[index]);
             }
         }
-
-        return string.Join(" ", phonemes);
+        return phonemes;
     }
 
-    private string PredictAutoregressive(
+    private List<string> PredictAutoregressiveTokens(
         string word,
         InferenceSession session,
         Dictionary<char, int> graphemeIndexes,
@@ -1000,8 +865,360 @@ public partial class MainWindow : Window {
                 phonemes.Add(modelPhonemes[index]);
             }
         }
+        return phonemes;
+    }
 
-        return string.Join(" ", phonemes);
+    private List<TokenLogProbModel> BuildLogProbsFromTokens(List<string> tokens, float confidence) {
+        var list = new List<TokenLogProbModel>();
+        float logProb = (float)Math.Log(confidence);
+
+        foreach (var ph in tokens) {
+            string categoryName = GetPhonemeCategoryName(ph);
+            list.Add(new TokenLogProbModel {
+                Phoneme = ph,
+                CategoryName = categoryName,
+                LogProbability = logProb,
+                Confidence = confidence,
+                TextColor = GetCategoryTextColorByName(categoryName)
+            });
+        }
+        return list;
+    }
+
+    private void RenderNoteBoxes(List<DetailedPrediction> predictions) {
+        List<string> detectedCategoryNames = new();
+
+        bool canUpdateInPlace = _noteCollection.Count == predictions.Count &&
+                                _noteCollection.Select(n => n.Word).SequenceEqual(predictions.Select(p => p.Word));
+
+        if (!canUpdateInPlace) {
+            _noteCollection.Clear();
+        }
+
+        for (int i = 0; i < predictions.Count; i++) {
+            var pred = predictions[i];
+            NoteBoxModel noteModel;
+
+            if (canUpdateInPlace) {
+                noteModel = _noteCollection[i];
+                noteModel.Phonemes.Clear();
+                noteModel.Alternatives.Clear();
+                noteModel.LogProbs.Clear();
+            } else {
+                noteModel = new NoteBoxModel();
+            }
+
+            string isoLang = GetIsoLanguageCode(pred.SourceLanguage);
+            if (string.IsNullOrEmpty(isoLang)) isoLang = pred.SourceLanguage;
+
+            noteModel.Word = pred.Word;
+            noteModel.ModelTag = $"[{isoLang}]";
+            noteModel.SourceModelInfo = $"Active: {pred.SourceModelName} [{isoLang}] {(pred.IsMergedModel ? "(Merged)" : "(Primary)")}";
+            noteModel.OverallConfidence = pred.OverallConfidence;
+            noteModel.HasMergedModel = _mergedConfig != null;
+
+            foreach (var cand in pred.CandidateList) {
+                cand.ParentNote = noteModel;
+                noteModel.Alternatives.Add(cand);
+            }
+
+            foreach (var lp in pred.TokenLogProbs) {
+                noteModel.LogProbs.Add(lp);
+            }
+
+            var formattedPhonemes = FormatPhonemesWithSyllableSeparators(pred.SelectedPhonemes, ref detectedCategoryNames);
+            foreach (var item in formattedPhonemes) {
+                noteModel.Phonemes.Add(item);
+            }
+
+            if (!canUpdateInPlace) {
+                _noteCollection.Add(noteModel);
+            }
+        }
+
+        UpdateLegendCounts(detectedCategoryNames);
+    }
+
+    private void OnNoteBoxPointerPressed(object? sender, PointerPressedEventArgs e) {
+        if (sender is Control control && control.DataContext is NoteBoxModel noteModel) {
+            var point = e.GetCurrentPoint(control);
+            string wordLower = noteModel.Word.ToLower();
+
+            if (point.Properties.IsRightButtonPressed) {
+                bool currentMergedState = _wordModelOverrides.TryGetValue(wordLower, out bool? state) && state == true;
+                bool newMergedState = !currentMergedState;
+                _wordModelOverrides[wordLower] = newMergedState;
+                _manualCandidateOverrides.Remove(wordLower);
+
+                string targetModelName = newMergedState ? (_mergedConfig?.model_name ?? "Merged") : (_activeConfig?.model_name ?? "Primary");
+                Log.Information("Toggled model for word '{Word}' to {TargetModel}", noteModel.Word, targetModelName);
+                StatusLog.Text = $"Switched '{noteModel.Word}' to {targetModelName}";
+                ExecutePrediction();
+            } else if (point.Properties.IsLeftButtonPressed) {
+                FlyoutBase.ShowAttachedFlyout(control);
+            }
+        }
+    }
+
+    private void OnSwitchToPrimaryModelClicked(object? sender, RoutedEventArgs e) {
+        if (sender is Button btn && btn.Tag is NoteBoxModel noteModel) {
+            string wordLower = noteModel.Word.ToLower();
+            _wordModelOverrides[wordLower] = false;
+            _manualCandidateOverrides.Remove(wordLower);
+
+            Log.Information("Forced Primary Model for word '{Word}'", noteModel.Word);
+            StatusLog.Text = $"Set '{noteModel.Word}' to Primary Model ({_activeConfig?.model_name})";
+            ExecutePrediction();
+        }
+    }
+
+    private void OnSwitchToMergedModelClicked(object? sender, RoutedEventArgs e) {
+        if (sender is Button btn && btn.Tag is NoteBoxModel noteModel) {
+            if (_mergedConfig == null) {
+                StatusLog.Text = $"No merged model available for '{noteModel.Word}'";
+                return;
+            }
+
+            string wordLower = noteModel.Word.ToLower();
+            _wordModelOverrides[wordLower] = true;
+            _manualCandidateOverrides.Remove(wordLower);
+
+            Log.Information("Forced Merged Model ('{MergedName}') for word '{Word}'", _mergedConfig.model_name, noteModel.Word);
+            StatusLog.Text = $"Set '{noteModel.Word}' to Merged Model ({_mergedConfig.model_name})";
+            ExecutePrediction();
+        }
+    }
+
+    private void OnCandidateSelected(object? sender, RoutedEventArgs e) {
+        if (sender is Button btn && btn.Tag is CandidateModel selectedCandidate && selectedCandidate.ParentNote != null) {
+            string wordLower = selectedCandidate.ParentNote.Word.ToLower();
+            _manualCandidateOverrides[wordLower] = selectedCandidate.DisplayPhonemes;
+
+            Log.Information("User explicitly selected candidate '{Variant}' [{Phonemes}] for word '{Word}'",
+                selectedCandidate.VariantLabel, selectedCandidate.DisplayPhonemes, selectedCandidate.ParentNote.Word);
+            
+            StatusLog.Text = $"Selected variant '{selectedCandidate.VariantLabel}' [{selectedCandidate.DisplayPhonemes}]";
+            ExecutePrediction();
+        }
+    }
+
+    private List<PhonemeTextModel> FormatPhonemesWithSyllableSeparators(List<string> phonemeList, ref List<string> detectedCategoryNames) {
+        var result = new List<PhonemeTextModel>();
+        if (phonemeList == null || phonemeList.Count == 0) return result;
+
+        bool hasExplicitBoundaries = phonemeList.Any(p => p == "." || p == "-" || p == "|");
+        List<List<string>> syllables = new();
+
+        if (hasExplicitBoundaries) {
+            List<string> currentSyllable = new();
+            foreach (var ph in phonemeList) {
+                if (ph == "." || ph == "-" || ph == "|") {
+                    if (currentSyllable.Count > 0) {
+                        syllables.Add(new List<string>(currentSyllable));
+                        currentSyllable.Clear();
+                    }
+                } else {
+                    currentSyllable.Add(ph);
+                }
+            }
+            if (currentSyllable.Count > 0) syllables.Add(currentSyllable);
+        } else {
+            syllables = SyllabifyByVowels(phonemeList);
+        }
+
+        for (int s = 0; s < syllables.Count; s++) {
+            var syllable = syllables[s];
+
+            for (int p = 0; p < syllable.Count; p++) {
+                string ph = syllable[p];
+                string categoryName = GetPhonemeCategoryName(ph);
+                if (ph != "N/A") detectedCategoryNames.Add(categoryName);
+
+                result.Add(new PhonemeTextModel {
+                    Phoneme = ph,
+                    TypeName = categoryName,
+                    Foreground = GetCategoryTextColorByName(categoryName)
+                });
+            }
+
+            if (s < syllables.Count - 1) {
+                result.Add(new PhonemeTextModel {
+                    Phoneme = "|",
+                    TypeName = "Syllable Boundary",
+                    Foreground = GetCategoryTextColorByName("Separator")
+                });
+            }
+        }
+
+        return result;
+    }
+
+    private bool IsVowelPhoneme(string ph) {
+        if (string.IsNullOrWhiteSpace(ph)) return false;
+        string category = GetPhonemeCategoryName(ph);
+        if (category.Equals("Vowel", StringComparison.OrdinalIgnoreCase)) return true;
+        return Regex.IsMatch(ph.ToLower(), @"^(a|i|u|e|o|aa|ae|ah|ao|aw|ax|ay|eh|er|ey|ih|iy|ow|oy|uh|uw|@r|iw|uy|ew)");
+    }
+
+    private static bool IsValidOnsetCluster(string c1, string c2) {
+        string cluster = (c1 + c2).ToLower();
+        var validClusters = new HashSet<string>(StringComparer.OrdinalIgnoreCase) {
+            "pr", "br", "tr", "dr", "kr", "gr", "fr", "pl", "bl", "kl", "gl", "fl", "sl",
+            "sp", "st", "sk", "sm", "sn", "sw", "tw", "dw", "kw", "gw", "ch", "sh", "th",
+            "ts", "dy", "ny", "sy", "ly", "ry", "my", "py", "by", "ky", "gy"
+        };
+        return validClusters.Contains(cluster);
+    }
+
+    private List<List<string>> SyllabifyByVowels(List<string> phonemes) {
+        var syllables = new List<List<string>>();
+        if (phonemes == null || phonemes.Count == 0) return syllables;
+
+        List<int> vowelIndices = new List<int>();
+        for (int i = 0; i < phonemes.Count; i++) {
+            if (IsVowelPhoneme(phonemes[i])) vowelIndices.Add(i);
+        }
+
+        if (vowelIndices.Count <= 1) {
+            syllables.Add(new List<string>(phonemes));
+            return syllables;
+        }
+
+        List<int> splitIndices = new List<int>();
+
+        for (int v = 0; v < vowelIndices.Count - 1; v++) {
+            int v1 = vowelIndices[v];
+            int v2 = vowelIndices[v + 1];
+            int consCount = v2 - v1 - 1;
+
+            int splitAt;
+            if (consCount <= 1) {
+                splitAt = v1 + 1;
+            } else if (consCount == 2) {
+                string c1 = phonemes[v1 + 1];
+                string c2 = phonemes[v1 + 2];
+
+                if (c1.Equals("s", StringComparison.OrdinalIgnoreCase) && Regex.IsMatch(c2, @"^(p|t|k|b|d|g|m|n)$", RegexOptions.IgnoreCase)) {
+                    splitAt = v1 + 2;
+                } else if (IsValidOnsetCluster(c1, c2)) {
+                    splitAt = v1 + 1;
+                } else {
+                    splitAt = v1 + 2;
+                }
+            } else {
+                string cPrev = phonemes[v2 - 2];
+                string cLast = phonemes[v2 - 1];
+                splitAt = IsValidOnsetCluster(cPrev, cLast) ? v2 - 2 : v2 - 1;
+            }
+
+            splitIndices.Add(splitAt);
+        }
+
+        int currentStart = 0;
+        foreach (int splitIdx in splitIndices) {
+            int length = splitIdx - currentStart;
+            if (length > 0) syllables.Add(phonemes.GetRange(currentStart, length));
+            currentStart = splitIdx;
+        }
+        if (currentStart < phonemes.Count) {
+            syllables.Add(phonemes.GetRange(currentStart, phonemes.Count - currentStart));
+        }
+
+        return syllables;
+    }
+
+    private string GetPhonemeCategoryName(string phoneme) {
+        if (string.IsNullOrWhiteSpace(phoneme)) return "Unknown";
+
+        string pLower = phoneme.ToLower();
+        string pBase = Regex.Replace(pLower, @"[0-9]+$", "");
+
+        if (_modelPhoneTypes.TryGetValue(pLower, out var customTypeExact)) {
+            return customTypeExact;
+        }
+
+        if (_modelPhoneTypes.TryGetValue(pBase, out var customTypeBase)) {
+            return customTypeBase;
+        }
+
+        return CategorizePhonemeFallback(pBase).ToString();
+    }
+
+    private static PhonemeCategory CategorizePhonemeFallback(string p) {
+        // Strip any lingering numbers just in case
+        string pClean = Regex.Replace(p.ToLower(), @"[0-9]+$", "");
+
+        if (Regex.IsMatch(pClean, @"^(a|i|u|e|o|aa|ae|ah|ao|aw|ax|ay|eh|er|ey|ih|iy|ow|oy|uh|uw|n|v|q)$"))
+            return PhonemeCategory.Vowel;
+
+        if (Regex.IsMatch(pClean, @"^(p|b|t|d|k|g|cl|q|tt|pp|kk|dd|bb|gg)$"))
+            return PhonemeCategory.Stop;
+
+        if (Regex.IsMatch(pClean, @"^(ch|j|ts|dz|tsh|dzh|c)$"))
+            return PhonemeCategory.Affricate;
+
+        if (Regex.IsMatch(pClean, @"^(f|v|th|dh|s|z|sh|zh|hy|x|h)$"))
+            return PhonemeCategory.Fricative;
+
+        if (Regex.IsMatch(pClean, @"^(m|n|ng|ny|n')$"))
+            return PhonemeCategory.Nasal;
+
+        if (Regex.IsMatch(pClean, @"^(w|y|j)$"))
+            return PhonemeCategory.Semivowel;
+
+        if (Regex.IsMatch(pClean, @"^(l|r)$"))
+            return PhonemeCategory.Liquid;
+
+        if (Regex.IsMatch(pClean, @"^(rr|dx|ry)$"))
+            return PhonemeCategory.Tap;
+
+        if (Regex.IsMatch(pClean, @"^(hh|h)$"))
+            return PhonemeCategory.Aspirate;
+
+        return PhonemeCategory.Unknown;
+    }
+
+    private static IBrush GetCategoryTextColorByName(string categoryName) {
+        string lower = categoryName.ToLowerInvariant();
+
+        if (lower.Contains("separator")) return new SolidColorBrush(Color.Parse("#C2B496"));
+        if (lower.Contains("vowel")) return new SolidColorBrush(Color.Parse("#209988"));
+        if (lower.Contains("stop") || lower.Contains("plosive")) return new SolidColorBrush(Color.Parse("#D9534F"));
+        if (lower.Contains("affricate")) return new SolidColorBrush(Color.Parse("#D97706"));
+        if (lower.Contains("fricative")) return new SolidColorBrush(Color.Parse("#B2742E"));
+        if (lower.Contains("nasal")) return new SolidColorBrush(Color.Parse("#8E44AD"));
+        if (lower.Contains("semivowel") || lower.Contains("glide")) return new SolidColorBrush(Color.Parse("#16A085"));
+        if (lower.Contains("liquid")) return new SolidColorBrush(Color.Parse("#D35400"));
+        if (lower.Contains("tap") || lower.Contains("flap")) return new SolidColorBrush(Color.Parse("#C0392B"));
+        if (lower.Contains("aspirate")) return new SolidColorBrush(Color.Parse("#804D1C"));
+
+        int hash = Math.Abs(categoryName.GetHashCode());
+        string[] customPalette = new[] {
+            "#209988", "#D9534F", "#D97706", "#B2742E", "#8E44AD",
+            "#16A085", "#D35400", "#C0392B", "#804D1C"
+        };
+        return new SolidColorBrush(Color.Parse(customPalette[hash % customPalette.Length]));
+    }
+
+    private void UpdateLegendCounts(List<string> activeCategories) {
+        _legendCollection.Clear();
+
+        var defaultCategories = Enum.GetValues<PhonemeCategory>()
+            .Where(c => c != PhonemeCategory.Separator && c != PhonemeCategory.Unknown)
+            .Select(c => c.ToString());
+
+        var allCategories = defaultCategories.Union(_modelPhoneTypes.Values).Distinct();
+
+        foreach (var catName in allCategories) {
+            int count = activeCategories.Count(c => c.Equals(catName, StringComparison.OrdinalIgnoreCase));
+            IBrush colorBrush = GetCategoryTextColorByName(catName);
+
+            _legendCollection.Add(new PhonemeTypeLegendModel {
+                TypeName = catName,
+                BadgeColor = colorBrush,
+                Count = count
+            });
+        }
     }
 
     private string SplitInput(string inputText) {

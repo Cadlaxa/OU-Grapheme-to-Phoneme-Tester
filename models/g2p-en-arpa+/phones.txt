@@ -10,13 +10,13 @@ ch	affricate
 d	stop
 dh	fricative
 dr	affricate
-dx	stop
+dx	tap
 eh	vowel
 er	vowel
 ey	vowel
 f	fricative
-g	fricative
-hh	fricative
+g	stop
+hh	aspirate
 ih	vowel
 iy	vowel
 jh	affricate
